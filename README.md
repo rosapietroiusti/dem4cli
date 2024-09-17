@@ -33,7 +33,7 @@ from population_demographics import *
 da_pop_demographics_ssp3 = population_demographics_gridscale_global(startyear=2000,
                                                                     endyear=2003,
                                                                     ssp=3,
-                                                                    urbanrural=False) # whether or not to include urban, rural and total pop variables 
+                                                                    urbanrural=False) 
 ```
 
 > [!WARNING]
