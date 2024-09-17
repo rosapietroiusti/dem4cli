@@ -32,8 +32,8 @@ from population_demographics import *
 
 da_pop_demographics_ssp3 = population_demographics_gridscale_global(startyear=2000,
                                                                     endyear=2003,
-                                                                    isimip_round=3, 
-                                                                    ssp=3)
+                                                                    ssp=3,
+                                                                    urbanrural=False) # whether or not to include urban, rural and total pop variables 
 ```
 
 > [!WARNING]
@@ -44,8 +44,3 @@ da_pop_demographics_ssp3 = population_demographics_gridscale_global(startyear=20
 >  - interpolates linearly the life expectancy data to get it for each exact year instead of every 5 years (note: this is not corrected to remain mean-preserving).
 >  - Old data: UN World Population Prospects 2019 life expectancy data at 5 years old from 1950 to 2020 per country (as average in 5-year brackets) (https://population.un.org/wpp/Download/Standard/Mortality/)
 
-
-## To do:
-- remove option to run ISIMIP2b-SSP2 data
-- lazy loading of data, make lighter/faster
-- separate rendering of urban/rural population 
