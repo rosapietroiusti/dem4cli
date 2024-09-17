@@ -104,8 +104,8 @@ def load_country_stats(
 
 def load_cohort_sizes( 
     filepaths_wcde = ['./data/cohort-sizes/WCDE/wicdf_ssp1.csv', 
-                                         './data/cohort-sizes/WCDE/wicdf_ssp2.csv', 
-                                         './data/cohort-sizes/WCDE/wicdf_ssp3.csv'],
+                      './data/cohort-sizes/WCDE/wicdf_ssp2.csv', 
+                      './data/cohort-sizes/WCDE/wicdf_ssp3.csv'],
                       ssp = 2,
                       by_sex = False
 ):
@@ -199,9 +199,12 @@ def load_population(
     then from Gao et al. 2020 (https://doi.org/10.5065/D60Z721H AND https://doi.org/10.7927/q7z9-9r69),
     scaled to match ISIMIP national population projections under different SSPs. 
 
-    Notes: Other SSPs are available from Gao et al. but haven't been scaled to match ISIMIP
+    Notes: Other SSPs are available from Gao et al. but haven't been scaled to match ISIMIP - > also 5 arcmin is available too! 
     national population totals. 
-    Did they fix the hist-to-ssp transition period? 
+    Did they fix the hist-to-ssp transition period? Dont think so. Fix this if important for analyses. 
+
+    To do:
+    - dont make it load all years of pop data! Select the period first. 
     
     Input: 
         filepaths to gridded population (embedded in function for now). 
@@ -217,15 +220,15 @@ def load_population(
                                          )['total-population'] 
         da_pop_histsoc2 = xr.open_dataset(os.path.join(dir_population,'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1901_2014.nc'),
                                          )['total-population']     
-        if ssp==2:
-            print('error ssp2 population data not provided in ISIMIP3b')
-        else:
-            print(f'opening isimip3 - ssp{ssp}')
-            da_pop_sspsoc = xr.open_dataset(glob.glob(os.path.join(dir_population,f'ISIMIP3/ISIMIP3b/ssp{ssp}*/population_ssp{ssp}_30arcmin_annual_2015_2100.nc'))[0],  decode_times=False)['total-population'] 
-            da_pop_sspsoc['time'] = np.array([np.datetime64(f'{year}-01-01T12:00:00', 'ns') for year in np.arange(2015,2101)]) 
-            #  concatenate historical and future data
-            da_population = xr.concat([da_pop_histsoc1, da_pop_histsoc2, da_pop_sspsoc], dim='time') 
-            da_population['time'] = da_population.time.dt.year.values
+        # if ssp==2:
+        #     print('error ssp2 population data not provided in ISIMIP3b')
+        # else:
+        print(f'opening isimip3 - ssp{ssp}')
+        da_pop_sspsoc = xr.open_dataset(glob.glob(os.path.join(dir_population,f'ISIMIP3/ISIMIP3b/ssp{ssp}*/population_ssp{ssp}_30arcmin_annual_2015_2100.nc'))[0],  decode_times=False)['total-population'] 
+        da_pop_sspsoc['time'] = np.array([np.datetime64(f'{year}-01-01T12:00:00', 'ns') for year in np.arange(2015,2101)]) 
+        #  concatenate historical and future data
+        da_population = xr.concat([da_pop_histsoc1, da_pop_histsoc2, da_pop_sspsoc], dim='time') 
+        da_population['time'] = da_population.time.dt.year.values
 
 
     elif isimip_round==2:
@@ -694,7 +697,7 @@ def population_demographics_gridscale_global(
     startyear=2000,
     endyear=2005,
     ssp=2,
-    isimip_round=2,
+    isimip_round=3,
     chunksize=100
 ):
     """
