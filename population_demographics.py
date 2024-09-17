@@ -27,12 +27,12 @@ import warnings
 import openpyxl 
 
 
-
+script_dir = os.path.abspath( os.path.dirname( __file__ ) )
 
 
 def load_country_metadata(
-    filepath_isimip_countries = './data/country-masks/isipedia-countries/countryData.json',
-    filepath_world_bank = './data/income-groups/world_bank/CLASS.xlsx',
+    filepath_isimip_countries = os.path.join(script_dir, 'data/country-masks/isipedia-countries/countryData.json'),
+    filepath_world_bank = os.path.join(script_dir, 'data/income-groups/world_bank/CLASS.xlsx'),
     keep_names='isimip',
     keep_stats=False,
 
@@ -86,7 +86,7 @@ def load_country_metadata(
 
 # COULD DELETE THIS ! 
 def load_country_stats(
-    filepath_isimip_stats = './data/country-masks/isipedia-countries/countryprofiledata.json'
+    filepath_isimip_stats = os.path.join(script_dir, 'data/country-masks/isipedia-countries/countryprofiledata.json')
                       ):
     """
     Load statistics for 195 official/observer UN countries from isipedia-countries. 
@@ -103,9 +103,9 @@ def load_country_stats(
 
 
 def load_cohort_sizes( 
-    filepaths_wcde = ['./data/cohort-sizes/WCDE/wicdf_ssp1.csv', 
-                      './data/cohort-sizes/WCDE/wicdf_ssp2.csv', 
-                      './data/cohort-sizes/WCDE/wicdf_ssp3.csv'],
+    filepaths_wcde = [os.path.join(script_dir, 'data/cohort-sizes/WCDE/wicdf_ssp1.csv'), 
+                      os.path.join(script_dir, 'data/cohort-sizes/WCDE/wicdf_ssp2.csv'), 
+                      os.path.join(script_dir, 'data/cohort-sizes/WCDE/wicdf_ssp3.csv')],
                       ssp = 2,
                       by_sex = False
 ):
@@ -181,7 +181,7 @@ def load_cohort_sizes(
 
 
 def load_population(
-    dir_population='./data/gridded-pop/', 
+    dir_population=os.path.join(script_dir, 'data/gridded-pop/'), 
     startyear=1850,
     endyear=2100,
     ssp=3,
@@ -257,7 +257,7 @@ def load_population(
 
 
 def load_countrymasks_fillcoasts(
-    filepath='./data/country-masks/isipedia-countries/countrymasks_fractional.nc',
+    filepath=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_fractional.nc'),
 fillcoast=True):
 
     # Part 1. Open data 
@@ -293,13 +293,13 @@ fillcoast=True):
 
 
 def match_country_names_all_mask_frac(
-    filepath_isimip_countries = './data/country-masks/isipedia-countries/countryData.json',
-    filepath_world_bank = './data/income-groups/world_bank/CLASS.xlsx',
-    filepaths_wcde = ['./data/cohort-sizes/WCDE/wicdf_ssp1.csv',
-                      './data/cohort-sizes/WCDE/wicdf_ssp2.csv', 
-                      './data/cohort-sizes/WCDE/wicdf_ssp3.csv'],
-    filepath_mask='./data/country-masks/isipedia-countries/countrymasks.geojson',
-    filepath_mask_frac='./data/country-masks/isipedia-countries/countrymasks_fractional.nc',
+    filepath_isimip_countries = os.path.join(script_dir, 'data/country-masks/isipedia-countries/countryData.json'),
+    filepath_world_bank = os.path.join(script_dir, 'data/income-groups/world_bank/CLASS.xlsx'),
+    filepaths_wcde = [os.path.join(script_dir, 'data/cohort-sizes/WCDE/wicdf_ssp1.csv'),
+                      os.path.join(script_dir, 'data/cohort-sizes/WCDE/wicdf_ssp2.csv'), 
+                      os.path.join(script_dir, 'data/cohort-sizes/WCDE/wicdf_ssp3.csv')],
+    filepath_mask=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks.geojson'),
+    filepath_mask_frac=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_fractional.nc'),
 ):
     """
     A somewhat ugly function that matches country names and country codes between all data sources used. Namely, 

@@ -25,6 +25,8 @@ Klein Goldewijk et al.2022), from 2022 SSP projections (based on Gao et al. 2020
 
 WCDE cohort size estimates are linearly interpolated from age-brackets to exact ages, correcting such that the mean is preserved, and then linearly interpolated from snapshots every 5 years to yearly values, so that you have a cohort size value for each exact age each year. Then, using the fractional country masks the proportion of cohort size in each country each year is applied to the gridded population of that country, assuming the cohort proportions are constant across the country. The population totals from the gridded population data are thus conserved (with ~0.03-0.05% of population lost due to mismatch between the countries covered by WCDE and those available in fractional country masks). 
 
+Option to output separate variables for urban, rural and total population.
+
 You can run this as, e.g.:
 
 ```
@@ -36,8 +38,10 @@ da_pop_demographics_ssp3 = population_demographics_gridscale_global(startyear=20
                                                                     urbanrural=False) 
 ```
 
+
+ ### Part 2: Lifetime exposure
+ 
 > [!WARNING]
-> ### Part 2: Lifetime exposure
 > 2024 update is work in progress, will update to UNWPP2024:
 > - turns UNWPP2019 from life expectancy expressed as years left to live at the age of 5 (ex) into  life expectancy at birth, neglecting child mortality, by subtracting 5 from the central year of the estimate
 >  - turns the period life expectancy into cohort life expectancy, by adding 6 to the life expectancy value based on the lags theory in Goldstein & Wachter (2006) "Relationships between period and cohort life expectancy: Gaps and lags"
