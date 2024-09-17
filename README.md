@@ -13,8 +13,8 @@ Contact: rosa.pietroiusti@vub.be
 
 
 1. Wittgenstein Center Data Explorer population cohort size from 1950 to 2100 per country (at snapshots every 5 years) (http://dataexplorer.wittgensteincentre.org/wcde-v2/), available for SSP1, SSP2, SSP3
-2. ISIMIP gridded population data reconstructions and projections. For SSP1 and SSP3 these are taken from ISIMIP3a/b (histsoc up to 2021 based on HYDE v3.3 
-Klein Goldewijk et al.2022), from 2022 SSP projections (based on Gao et al. 2020 https://doi.org/10.5065/D60Z721H and https://doi.org/10.7927/q7z9-9r69), scaled to match ISIMIP national population projections under different SSPs. For SSP2 these are not available yet and they are taken from ISIMIP2a/2b under histsoc until 2005 (based on the HYDE3.2) and SSP2 thereafter (from Jones & O'Neill 2016 https://www.isimip.org/gettingstarted/input-data-bias-adjustment/details/62/ and http://doi.org/10.1088/1748-9326/11/8/084003)
+2. ISIMIP gridded population data reconstructions and projections for SSP1, SSP2 and SSP3 from ISIMIP3a/b (histsoc up to 2021 based on HYDE v3.3 
+Klein Goldewijk et al.2022), from 2022 SSP projections (based on Gao et al. 2020 https://doi.org/10.5065/D60Z721H and https://doi.org/10.7927/q7z9-9r69), scaled to match ISIMIP national population projections under different SSPs.
 3. Isipedia fractional country masks are used to match the datasets (Perrette 2023, https://github.com/ISI-MIP/isipedia-countries). 
 4. Metadata on income levels and regions from World Bank (WB 2023, https://datatopics.worldbank.org/world-development-indicators/the-world-by-income-and-region.html)
 
@@ -44,3 +44,8 @@ da_pop_demographics_ssp3 = population_demographics_gridscale_global(startyear=20
 >  - interpolates linearly the life expectancy data to get it for each exact year instead of every 5 years (note: this is not corrected to remain mean-preserving).
 >  - Old data: UN World Population Prospects 2019 life expectancy data at 5 years old from 1950 to 2020 per country (as average in 5-year brackets) (https://population.un.org/wpp/Download/Standard/Mortality/)
 
+
+## To do:
+- remove option to run ISIMIP2b-SSP2 data
+- lazy loading of data, make lighter/faster
+- separate rendering of urban/rural population 

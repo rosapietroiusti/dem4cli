@@ -180,16 +180,12 @@ def load_cohort_sizes(
 
 
 
-
-
-
-
 def load_population(
     dir_population='./data/gridded-pop/', 
-    isimip_round=3,
     startyear=1850,
     endyear=2100,
     ssp=3,
+    urbanrural=False,
     chunksize=100
 ):
     """
@@ -203,57 +199,58 @@ def load_population(
     national population totals. 
     Did they fix the hist-to-ssp transition period? Dont think so. Fix this if important for analyses. 
 
-    To do:
-    - dont make it load all years of pop data! Select the period first. 
-    
     Input: 
         filepaths to gridded population (embedded in function for now). 
         Implemented combinations isimip3-ssp1, isimip2-ssp2, isimip3-ssp3. 
+        urbanrural: False loads only population total, True loads total, urban and rural variables 
     
     Returns:
         da_population: (DataArray)  gridded population density. 
     """
 
-    if isimip_round ==3:
-        # load data
-        da_pop_histsoc1 = xr.open_dataset(os.path.join(dir_population,'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1850_1900.nc'),
-                                         )['total-population'] 
-        da_pop_histsoc2 = xr.open_dataset(os.path.join(dir_population,'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1901_2014.nc'),
-                                         )['total-population']     
-        # if ssp==2:
-        #     print('error ssp2 population data not provided in ISIMIP3b')
-        # else:
+    if urbanrural:
+        VARs=['urban-population','rural-population','total-population']
+    else:
+        VARs='total-population'
+    
+    # Initialize list to store datasets
+    datasets = []
+
+    # Load historical data conditionally based on the start and end year
+    if startyear <= 1900:
+        da_pop_histsoc1 = xr.open_dataset(
+            os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1850_1900.nc')
+        )[VARs]
+        da_pop_histsoc1['time'] = da_pop_histsoc1['time'].dt.year
+        da_pop_histsoc1 = da_pop_histsoc1.sel(time=slice(startyear, min(endyear, 1900)))
+        datasets.append(da_pop_histsoc1)
+
+    if startyear <= 2014 and endyear >= 1901:
+        da_pop_histsoc2 = xr.open_dataset(
+            os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1901_2014.nc')
+        )[VARs]
+        da_pop_histsoc2['time'] = da_pop_histsoc2['time'].dt.year
+        da_pop_histsoc2 = da_pop_histsoc2.sel(time=slice(max(startyear, 1901), min(endyear, 2014)))
+        datasets.append(da_pop_histsoc2)
+
+    # Load SSP data conditionally
+    if endyear >= 2015:
         print(f'opening isimip3 - ssp{ssp}')
-        da_pop_sspsoc = xr.open_dataset(glob.glob(os.path.join(dir_population,f'ISIMIP3/ISIMIP3b/ssp{ssp}*/population_ssp{ssp}_30arcmin_annual_2015_2100.nc'))[0],  decode_times=False)['total-population'] 
-        da_pop_sspsoc['time'] = np.array([np.datetime64(f'{year}-01-01T12:00:00', 'ns') for year in np.arange(2015,2101)]) 
-        #  concatenate historical and future data
-        da_population = xr.concat([da_pop_histsoc1, da_pop_histsoc2, da_pop_sspsoc], dim='time') 
-        da_population['time'] = da_population.time.dt.year.values
+        da_pop_sspsoc = xr.open_dataset(
+            glob.glob(os.path.join(dir_population, f'ISIMIP3/ISIMIP3b/ssp{ssp}*/population_ssp{ssp}_30arcmin_annual_2015_2100.nc'))[0],
+            decode_times=False
+        )[VARs]
+        da_pop_sspsoc['time'] = np.array([year for year in np.arange(2015, 2101)])
+        da_pop_sspsoc = da_pop_sspsoc.sel(time=slice(max(startyear, 2015), endyear))
+        datasets.append(da_pop_sspsoc)
 
-
-    elif isimip_round==2:
-        if ssp==2:
-            print('opening isimip2 - ssp2')
-            # load data
-            da_pop_histsoc = xr.open_dataset(os.path.join(dir_population,'ISIMIP2/population_histsoc_0p5deg_annual_1861-2005.nc4'), 
-                                             decode_times=False,
-                                            )['number_of_people'] 
-            da_pop_ssp2soc = xr.open_dataset(os.path.join(dir_population,'ISIMIP2/population_ssp2soc_0p5deg_annual_2006-2100.nc4'), 
-                                             decode_times=False,
-                                            )['number_of_people'] 
-            # manually adjust time dimension in both data arrays 
-            da_pop_histsoc['time'] = np.arange(1861,2006)
-            da_pop_ssp2soc['time'] = np.arange(2006,2101)
-            # concatenate historical and future data
-            da_population = xr.concat([da_pop_histsoc, da_pop_ssp2soc], dim='time') 
-        else:
-            print('error only ssp2 for isimip2 in data dir')
+    # Concatenate datasets if there are multiple
+    if len(datasets) > 1:
+        da_population = xr.concat(datasets, dim='time')
+    else:
+        da_population = datasets[0]
     
-    
-    return da_population.sel(time=slice(startyear,endyear))
-
-
-
+    return da_population
 
 
 
@@ -697,7 +694,7 @@ def population_demographics_gridscale_global(
     startyear=2000,
     endyear=2005,
     ssp=2,
-    isimip_round=3,
+    urbanrural=False,
     chunksize=100
 ):
     """
@@ -719,10 +716,10 @@ def population_demographics_gridscale_global(
 
     df_cohort_sizes, ages, years = load_cohort_sizes(ssp=ssp)
 
-    da_population = load_population(isimip_round=isimip_round, 
-                                    ssp=ssp,
+    da_population = load_population(ssp=ssp,
                                     startyear=startyear,
-                                    endyear=endyear,)
+                                    endyear=endyear,
+                                   urbanrural=urbanrural)
 
     print('loading country masks')
     da_countrymasks = load_countrymasks_fillcoasts().chunk({'lat': chunksize, 'lon': chunksize})
