@@ -7,7 +7,7 @@ Based on Thiery et al (2021), Grant et al (in review), Vanderkelen et al (in pre
 Contact: rosa.pietroiusti@vub.be
 
 > [!WARNING]
-> Work in progress: functions to calculate lifetime exposure at gridscale level, taken from Grant et al (2023, in prep)
+> Work in progress: functions to calculate lifetime exposure at gridscale level, taken from Grant et al (2024, in rev)
 
 ## Data used
 
