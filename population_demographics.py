@@ -260,7 +260,7 @@ def load_countrymasks_fillcoasts(
     filepath=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_fractional.nc'),
 fillcoast=True):
 
-    # Part 1. Open data 
+    # Open data 
     
     ds=xr.open_dataset(filepath)
     da_countrymasks = ds.to_array()
@@ -288,6 +288,20 @@ fillcoast=True):
 
 
 
+def load_countrymasks_binary(
+    filepath=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_binary_exclusive_0.5deg.nc')
+):
+    
+    ds=xr.open_dataset(filepath)
+    da_countrymasks = ds.to_array()
+
+    strings = da_countrymasks['variable'].values
+    cleaned_strings = [s[2:] if s.startswith('m_') else s for s in strings]
+    da_countrymasks['variable'] = cleaned_strings
+    # last variable is 'world', lose it 
+    da_countrymasks = da_countrymasks.isel(variable=slice(0,225))
+    
+    return da_countrymasks
 
 
 
@@ -637,7 +651,7 @@ def get_gridscale_demographics(
     make a function that does this just for one country/region if one only wants a certain country?
     """
 
-    da_pop = da_population.sel(time=slice(startyear, endyear)).chunk({'time': chunksize, 'lat': chunksize, 'lon': chunksize})  # check optimal chunking sizes and whether to chunk here or above,myabe here? 
+    da_pop = da_population.sel(time=slice(startyear, endyear)) #.chunk({'time': chunksize, 'lat': chunksize, 'lon': chunksize})  # check optimal chunking sizes and whether to chunk here or above,myabe here? 
     
     # Initialize the combined demographics DataArray
     da_pop_demographics = None
@@ -662,7 +676,7 @@ def get_gridscale_demographics(
         if iso in da_countrymasks['variable']: # do this in a slightly more intelligent way??? similar to what i was doing b4 with the dataframs, instead of if
         
             # Get cohort sizes of the country
-            da_smple_cht = da_cohort_size.sel(country=country).sel(time=slice(startyear, endyear)).chunk({'time': 10, 'ages': 10})
+            da_smple_cht = da_cohort_size.sel(country=country).sel(time=slice(startyear, endyear)) #.chunk({'time': 10, 'ages': 10})
         
             # Cohort relative sizes in the sample country
             da_smple_cht_prp = da_smple_cht / da_smple_cht.sum(dim='ages')
@@ -714,15 +728,15 @@ def population_demographics_gridscale_global(
     with HiddenPrints():
         df_countries_matched = match_country_names_all_mask_frac();
 
-    df_cohort_sizes, ages, years = load_cohort_sizes(ssp=ssp)
+        df_cohort_sizes, ages, years = load_cohort_sizes(ssp=ssp)
 
-    da_population = load_population(ssp=ssp,
+        da_population = load_population(ssp=ssp,
                                     startyear=startyear,
                                     endyear=endyear,
                                    urbanrural=urbanrural)
 
     print('loading country masks')
-    da_countrymasks = load_countrymasks_fillcoasts().chunk({'lat': chunksize, 'lon': chunksize})
+    da_countrymasks = load_countrymasks_fillcoasts() #.chunk({'lat': chunksize, 'lon': chunksize})
 
     print('interpolating cohort sizes per country')
     with HiddenPrints():
