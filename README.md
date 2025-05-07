@@ -7,14 +7,14 @@ Based on Thiery et al (2021), Grant et al (in review), Vanderkelen et al (in pre
 Contact: rosa.pietroiusti@vub.be
 
 > [!WARNING]
-> Work in progress: functions to calculate lifetime exposure at gridscale level, taken from Grant et al (2024, in rev)
+> Work in progress: functions to calculate lifetime exposure, at country and gridscale level, taken from Grant et al (2024, in rev)
 
 ## Data used
 
 
-1. Wittgenstein Center Data Explorer population cohort size from 1950 to 2100 per country (at snapshots every 5 years) (http://dataexplorer.wittgensteincentre.org/wcde-v2/), available for SSP1, SSP2, SSP3
+1. Wittgenstein Center Data Explorer population cohort size from 1950 to 2100 per country (at snapshots every 5 years) (http://dataexplorer.wittgensteincentre.org/wcde-v2/), available for SSP1, SSP2, SSP3. Cohort size data from WCDE is available at a country level for the period 1950-2100 (reconstructions up to 2015 and projections thereafter) expressed for 5-year age cohorts at 5-year time snapshots.
 2. ISIMIP gridded population data reconstructions and projections for SSP1, SSP2 and SSP3 from ISIMIP3a/b (histsoc up to 2021 based on HYDE v3.3 
-Klein Goldewijk et al.2022), from 2022 SSP projections (based on Gao et al. 2020 https://doi.org/10.5065/D60Z721H and https://doi.org/10.7927/q7z9-9r69), scaled to match ISIMIP national population projections under different SSPs.
+Klein Goldewijk et al.2022), from 2022 SSP projections (based on Gao et al. 2020 https://doi.org/10.5065/D60Z721H and https://doi.org/10.7927/q7z9-9r69), scaled to match ISIMIP national population projections under different SSPs. Projections are based on the national SSP scenarios from Lutz et al. (55) and gridded population projections from the National Center for Atmospheric Research (NCAR).
 3. Isipedia fractional country masks are used to match the datasets (Perrette 2023, https://github.com/ISI-MIP/isipedia-countries). 
 4. Metadata on income levels and regions from World Bank (WB 2023, https://datatopics.worldbank.org/world-development-indicators/the-world-by-income-and-region.html)
 
@@ -42,7 +42,7 @@ da_pop_demographics_ssp3 = population_demographics_gridscale_global(startyear=20
  ### Part 2: Lifetime exposure
  
 > [!WARNING]
-> 2024 update is work in progress, will update to UNWPP2024:
+> 2024 update is work in progress, updating to UNWPP2024:
 > - turns UNWPP2019 from life expectancy expressed as years left to live at the age of 5 (ex) into  life expectancy at birth, neglecting child mortality, by subtracting 5 from the central year of the estimate
 >  - turns the period life expectancy into cohort life expectancy, by adding 6 to the life expectancy value based on the lags theory in Goldstein & Wachter (2006) "Relationships between period and cohort life expectancy: Gaps and lags"
 >  - interpolates linearly the life expectancy data to get it for each exact year instead of every 5 years (note: this is not corrected to remain mean-preserving).

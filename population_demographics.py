@@ -30,6 +30,12 @@ import openpyxl
 script_dir = os.path.abspath( os.path.dirname( __file__ ) )
 
 
+# flag 
+
+# filepath_Luke
+# filepath_Rosa 
+
+
 def load_country_metadata(
     filepath_isimip_countries = os.path.join(script_dir, 'data/country-masks/isipedia-countries/countryData.json'),
     filepath_world_bank = os.path.join(script_dir, 'data/income-groups/world_bank/CLASS.xlsx'),
@@ -254,11 +260,90 @@ def load_population(
 
 
 
+def load_population_cut_to_region(
+    dir_population=os.path.join(script_dir, 'data/gridded-pop/'), 
+    startyear=1850,
+    endyear=2100,
+    ssp=3,
+    urbanrural=False,
+    bbox=None
+):
+
+    # Auxiliary function to slice each dataset to a particular region with coordinates.
+    def cut_to_region_time(da):
+        if da.time.dtype == 'datetime64[ns]':
+            da['time'] = da['time'].dt.year
+        else :
+            da['time'] = (da['time'] + 2015).astype(int) # for ssp data, years since 2015 not parsed correctly
+        return da.sel(lat=slice(bbox[0], bbox[1]), lon=slice(bbox[2], bbox[3]), time=slice(startyear, endyear))
+
+
+    filepaths_hist = [
+        os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1850_1900.nc'),
+        os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1901_2014.nc')
+    ] 
+
+    if urbanrural:
+        VARs=['urban-population','rural-population','total-population']
+    else:
+        VARs='total-population'
+    
+    # Initialize list to store das
+    das = []
+
+    # Import the file, concatenate years and cut for the chosen region
+    if startyear < 2015:
+        ds = xr.open_mfdataset(
+            filepaths_hist,
+            combine='nested',
+            concat_dim='time',
+            decode_coords='all',
+            preprocess=cut_to_region_time
+        )
+        
+        # Extract the  variable from the imported dataset
+        da = ds[VARs]
+
+        das.append(da)
+
+
+    if endyear >2015:
+        filepath_ssp = glob.glob(os.path.join(dir_population, f'ISIMIP3/ISIMIP3b/ssp{ssp}*/population_ssp{ssp}_30arcmin_annual_2015_2100.nc'))[0]
+
+        ds = xr.open_mfdataset(
+        filepath_ssp ,
+        combine='nested',
+        concat_dim='time',
+        decode_times=False,
+        preprocess=cut_to_region_time
+    )
+    
+        # Extract the  variable from the imported dataset
+        da = ds[VARs]
+
+        das.append(da)
+
+    # Concatenate datasets if there are multiple
+    if len(das) > 1:
+        da_population = xr.concat(das, dim='time')
+    else:
+        da_population = das[0]
+    
+    return da_population
+
+
+
+
+
+
+
+
 
 
 def load_countrymasks_fillcoasts(
     filepath=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_fractional.nc'),
-fillcoast=True):
+    fillcoast=True,
+    fix_smallislands=True):
 
     # Open data 
     
@@ -280,17 +365,31 @@ fillcoast=True):
         da_countrymasks_correct = xr.where(countrymask_sum < 1, da_countrymasks*(1/da_countrymasks.sum(dim='variable')), da_countrymasks)
         # small area sum = 2, correct for it 
         da_countrymasks_corr = xr.where(da_countrymasks_correct.sum(dim='variable') > 1, da_countrymasks_correct/da_countrymasks_correct.sum(dim='variable'), da_countrymasks_correct)
+
+        da_countrymasks = da_countrymasks_correct
+
     
-    
-        return da_countrymasks_corr
-    else:
-        return da_countrymasks
+    if fix_smallislands:  
+        # Fix issue in Singapore pixel, assign fraction from IOSID to SGP 
+        da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='SGP')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')].values
+        da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')] = 0
+        
+        # Fix it also in Mauritius 
+        da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='MUS')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')].values
+        da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')] = 0
+        
+
+    return da_countrymasks
 
 
 
 def load_countrymasks_binary(
     filepath=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_binary_exclusive_0.5deg.nc')
 ):
+
+    # look again at difference of these ! 
+
+    
     
     ds=xr.open_dataset(filepath)
     da_countrymasks = ds.to_array()
@@ -648,25 +747,24 @@ def get_gridscale_demographics(
 ):
     """
     To do: make a wrapper function that runs all previous and does this
-    make a function that does this just for one country/region if one only wants a certain country?
+    make a function that does this just for one country/region if one only wants a certain country? - doing it ! to clean up nicer later 
     """
 
     da_pop = da_population.sel(time=slice(startyear, endyear)) #.chunk({'time': chunksize, 'lat': chunksize, 'lon': chunksize})  # check optimal chunking sizes and whether to chunk here or above,myabe here? 
     
     # Initialize the combined demographics DataArray
     da_pop_demographics = None
+
     
-    # Fix issue in Singapore pixel, assign fraction from IOSID to SGP 
-    da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='SGP')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')].values
-    da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')] = 0
-    
-    # Fix it also in Mauritius 
-    da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='MUS')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')].values
-    da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')] = 0
-    
-    
+    # Option for running over one country only 
+    if da_cohort_size.country.values.size > 1:
+        ls_countries = da_cohort_size.country.values
+    else:
+        ls_countries = [da_cohort_size.country.values]
+
+
     # Loop over countries in WCDE cohort sizes
-    for country in da_cohort_size.country.values:
+    for country in ls_countries:
         print(country)
     
         # Get iso3 code of the country in the mask 
@@ -676,8 +774,11 @@ def get_gridscale_demographics(
         if iso in da_countrymasks['variable']: # do this in a slightly more intelligent way??? similar to what i was doing b4 with the dataframs, instead of if
         
             # Get cohort sizes of the country
-            da_smple_cht = da_cohort_size.sel(country=country).sel(time=slice(startyear, endyear)) #.chunk({'time': 10, 'ages': 10})
-        
+            if da_cohort_size.country.values.size > 1:
+                da_smple_cht = da_cohort_size.sel(country=country).sel(time=slice(startyear, endyear)) #.chunk({'time': 10, 'ages': 10})
+            else:
+                da_smple_cht = da_cohort_size.sel(time=slice(startyear, endyear)) 
+
             # Cohort relative sizes in the sample country
             da_smple_cht_prp = da_smple_cht / da_smple_cht.sum(dim='ages')
         
@@ -753,5 +854,19 @@ def population_demographics_gridscale_global(
                                                  endyear=endyear);
 
 
+
+    return da_pop_demographics
+
+
+
+def population_demographics_gridscale_selcountries(
+    startyear=2000,
+    endyear=2005,
+    ssp=2,
+    urbanrural=False,
+    countrylist=None
+):
+
+    pass
 
     return da_pop_demographics
