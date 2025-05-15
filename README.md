@@ -18,6 +18,16 @@ Klein Goldewijk et al.2022), from 2022 SSP projections (based on Gao et al. 2020
 3. Isipedia fractional country masks are used to match the datasets (Perrette 2023, https://github.com/ISI-MIP/isipedia-countries). 
 4. Metadata on income levels and regions from World Bank (WB 2023, https://datatopics.worldbank.org/world-development-indicators/the-world-by-income-and-region.html)
 
+### Data availability 
+
+Data necessary to run dem4cli is available in a zenodo repository: 
+
+To run dem4cli, you can include the 'data' folder in the same folder as the 'population_demographics.py' script
+
+```
+<SCRIPT_DIR>/data
+```
+
 
 ## What this module does 
 
