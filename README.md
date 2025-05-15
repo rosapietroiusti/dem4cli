@@ -20,12 +20,12 @@ Klein Goldewijk et al.2022), from 2022 SSP projections (based on Gao et al. 2020
 
 ### Data availability 
 
-Data necessary to run dem4cli is available in a zenodo repository: 
+Data necessary to run dem4cli is available in a zenodo repository: https://zenodo.org/records/15425666 (access by request). 
 
 To run dem4cli, you can include the 'data' folder in the same folder as the 'population_demographics.py' script
 
 ```
-<SCRIPT_DIR>/data
+<SCRIPT_DIR>/data/
 ```
 
 
