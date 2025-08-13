@@ -383,24 +383,24 @@ def load_countrymasks_fillcoasts(
 
 
 
-def load_countrymasks_binary(
-    filepath=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_binary_exclusive_0.5deg.nc')
-):
+# def load_countrymasks_binary(
+#     filepath=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_binary_exclusive_0.5deg.nc')
+# ):
 
-    # look again at difference of these ! 
+#     # look again at difference of these ! 
 
     
     
-    ds=xr.open_dataset(filepath)
-    da_countrymasks = ds.to_array()
+#     ds=xr.open_dataset(filepath)
+#     da_countrymasks = ds.to_array()
 
-    strings = da_countrymasks['variable'].values
-    cleaned_strings = [s[2:] if s.startswith('m_') else s for s in strings]
-    da_countrymasks['variable'] = cleaned_strings
-    # last variable is 'world', lose it 
-    da_countrymasks = da_countrymasks.isel(variable=slice(0,225))
+#     strings = da_countrymasks['variable'].values
+#     cleaned_strings = [s[2:] if s.startswith('m_') else s for s in strings]
+#     da_countrymasks['variable'] = cleaned_strings
+#     # last variable is 'world', lose it 
+#     da_countrymasks = da_countrymasks.isel(variable=slice(0,225))
     
-    return da_countrymasks
+#     return da_countrymasks
 
 
 
@@ -729,6 +729,9 @@ def interpolate_cohortsize_countries(
 
 
 
+# TODO ADD A WRAPPER FUNCTION THAT MAKES THE ORIGINAL DICTIONARY LUKE WAS OUTPUTTING, FOR S2S AND DEM4CLI v2.0 
+
+
 
 
 
@@ -867,6 +870,6 @@ def population_demographics_gridscale_selcountries(
     countrylist=None
 ):
 
-    pass
+    pass # TO DEVELOP for a single country 
 
     return da_pop_demographics

@@ -70,7 +70,7 @@ def load_unwpp():
 
 
 def get_life_expectancies(df_unwpp,
-                         interp=True):
+                         extend=True):
     
     """
     - Takes UNWPP life expectancy data expressed as years left to live at age of 5, 
@@ -89,12 +89,12 @@ def get_life_expectancies(df_unwpp,
     df_life_expectancy_5.index = df_life_expectancy_5.index-5 # year of birth 
     df_life_expectancy_5 = df_life_expectancy_5 + 5 + 6 
 
-    if interp:
+    if extend:
         # extend up to 2020 
-        df_life_expectancy_5_interp = df_life_expectancy_5.reindex(
-        np.arange(1945,2020+1)).astype( # make this more flexible 
+        df_life_expectancy_5_extend = df_life_expectancy_5.reindex(
+        np.arange(1945,2020+1)).astype( # make this more flexible !!
         'float').interpolate() # fills last two years constant at 2018 level 
     
-        return df_life_expectancy_5_interp
+        return df_life_expectancy_5_extend
     else:
         return df_life_expectancy_5
