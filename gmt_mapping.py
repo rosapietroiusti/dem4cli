@@ -3,7 +3,27 @@ Adapted from L. Grant 2025 Unprecedented lifetime exposure
 
 Amaury Laridon / Rosa Pietroiusti 
 
+
+To do
+- add data for representative scenarios
+
 """
+
+
+import numpy as np
+import xarray as xr
+import pandas as pd
+import geopandas as gpd
+import pickle as pk
+from scipy import interpolate
+import regionmask
+import glob
+import os
+from copy import deepcopy as cp
+
+
+from settings import * 
+
 
 
 def ar6_scen_grab(
@@ -11,11 +31,21 @@ def ar6_scen_grab(
     df_GMT_all,
 ):
     """
-    Load AR6 scenarios 
+    Filter represtative AR6 scenarios from whole AR6 scenario database. 
+
+    Input:
+        scens (dict):               defined in settings.py, thresholds to define representative scenarios filtered from AR6 explorer
+                                              as 1.5, 2, NDCs, 3, 4 degrees
+        df_GMT_all (df):                      all the AR6 pathways 
+
+    Returns:
+        df_GMT_lb, df_GMT_15, df_GMT_20, df_GMT_NDC, df_GMT_30, df_GMT_40 (dfs):    representative pathways for
+                                                                                    lower bound, 1.5 degree, 2 degree, NDCs, 3 degrees, 4 degrees (in 2100)
+
+    Notes:
+        - NDCs fixed at 2.4 in settings.py - update this value? 
+                                                                                    
     """
-
-
-    # for each line, additionally plot the candidate subsets and their names
     
     # start with upper line toward 4 degrees
     # convert to bools based on row max to find column with most maxes via idxmax
@@ -46,7 +76,7 @@ def ar6_scen_grab(
         maxes.columns = df_GMT_30[df_GMT_30.columns[dfbools.all()]].columns
         df_GMT_30 = df_GMT_30[df_GMT_30.columns[dfbools.all()]].loc[:,maxes.sum(axis=0).idxmax()]
         
-    # third line, NDC (going for 2.7)
+    # third line, NDC 
     df_GMT_NDC = df_GMT_all[
         df_GMT_all.columns[(df_GMT_all.max(axis=0)<scens['NDC'][1])&(df_GMT_all.max(axis=0)>scens['NDC'][0])]
     ]
@@ -114,9 +144,6 @@ def ar6_scen_grab(
 
 
 
-
-#%%
-
 #%%---------------------------------------------------------------#
 # Load global mean temperature projections and build              #
 # stylized trajectories                                           #
@@ -125,22 +152,40 @@ def ar6_scen_grab(
 def load_GMT(
     year_start,
     year_end,
-    year_range,
-    flags,
+    gmt_extend_method='10yrtrend',
 ):
 
     """
-    Creation of stylized GMT trajectories based on loaded pathways
+    Creation of stylized GMT trajectories based on loaded pathways, using method that in S2S is called 
+    'ar6_new_dem4cli', i.e. takes pathways from AR6 scenarios explorer, interpolates to have them at regular 0.1 
+    intervals as stylized trajectories, interpolates again to have pathways going from 1.5 to 3.5 degrees in 2100. 
+
+    Input
+        year_start, year_end:       desired start and end of stylized trajectories
+        gmt_extend_method (str):    options to extend past 2100 - '10yrmean' 'lastyear' and '10yrtrend'
+                                    respectively repeat last 10 year mean, repeat last year and extend last 
+                                    10 year trend
+        filepaths embedded in function 
+
+    Returns 
+        df_GMT_15, df_GMT_20, df_GMT_NDC, df_GMT_OS, df_GMT_noOS, ds_GMT_STS, df_GMT_strj (dfs) :   stylized trajectories
+                                                                                                    note that OS, noOS and NDC might be outdated? OS and noOS come from Wim's original code and NDC hits 2.4
+
+    Notes
+        - df_GMT_OS, df_GMT_noOS, ds_GMT_STS now inconsistent with new method for post 2100 extension? doing 10yrmean
+        - original df_GMT_SR15 used only to get historical 1960-1999
+        - can still clean this up a bit
     """
 
-#%%   
+    flags['gmt_extend'] = gmt_extend_method
+
     # ---------------------------------------------------------- #
-    # Definition of the 1.5, 2.0 and NDC trajectories from SR15  #
+    # Definition trajectories from SR15                          #
     # This is the original scenarios used in Thiery et al.(2021) #                                      
     # ---------------------------------------------------------- #
 
-    # Luke's comment : (wim's original scenarios; will use historical obs years from here, 1960-1999, but replace with ar6 trajectories)
-    df_GMT_SR15 = pd.read_excel(data_dir+'temperature_trajectories_SR15/GMT_50pc_manualoutput_4pathways.xlsx', header=1);
+    # wim's original scenarios; use historical obs years from here, 1960-1999, but replace with ar6 trajectories from 2000
+    df_GMT_SR15 = pd.read_excel(dir_temperature_trajectories+'/temperature-trajectories_SR15/GMT_50pc_manualoutput_4pathways.xlsx', header=1);
     df_GMT_SR15 = df_GMT_SR15.iloc[:4,1:].transpose().rename(columns={
         0 : 'IPCCSR15_IMAGE 3.0.1_SSP1-26_GAS',
         1 : 'IPCCSR15_MESSAGE-GLOBIOM 1.0_ADVANCE_INDC_GAS',
@@ -148,23 +193,10 @@ def load_GMT(
         3 : 'IPCCSR15_MESSAGEix-GLOBIOM 1.0_LowEnergyDemand_GAS'
     })
 
-    if np.nanmax(df_GMT_SR15.index) < year_end: 
-        # repeat average of last 10 years (i.e. end-9 to end ==> 2090:2099)
-        GMT_last_10ymean = df_GMT_SR15.iloc[-10:,:].mean()
-        for year in range(np.nanmax(df_GMT_SR15.index),year_end+1): 
-            df_GMT_SR15 = pd.concat([df_GMT_SR15, pd.DataFrame(GMT_last_10ymean).transpose().rename(index={0:year})])
-
-    # cut to analysis years
-    # currently using hist from this earlier version of df_GMT_15 (df_GMT_15 gets remade under flags['gmt'] == 'ar6')
-    df_GMT_15 = df_GMT_SR15.loc[year_start:year_end,'IPCCSR15_MESSAGEix-GLOBIOM 1.0_LowEnergyDemand_GAS']
-    df_GMT_20 = df_GMT_SR15.loc[year_start:year_end,'IPCCSR15_IMAGE 3.0.1_SSP1-26_GAS']
-    df_GMT_NDC = df_GMT_SR15.loc[year_start:year_end,'IPCCSR15_MESSAGE-GLOBIOM 1.0_ADVANCE_INDC_GAS']
-
+    # currently using only hist from this earlier version of df_GMT_15 (df_GMT_15 gets remade below)
+    df_GMT_15 = df_GMT_SR15.loc[year_start:,'IPCCSR15_MESSAGEix-GLOBIOM 1.0_LowEnergyDemand_GAS']
     # check and drop duplicate years
     df_GMT_15 = df_GMT_15[~df_GMT_15.index.duplicated(keep='first')]
-    df_GMT_20 = df_GMT_20[~df_GMT_20.index.duplicated(keep='first')]
-    df_GMT_NDC = df_GMT_NDC[~df_GMT_NDC.index.duplicated(keep='first')]
-    df_GMT_SR15 = df_GMT_SR15[~df_GMT_SR15.index.duplicated(keep='first')]
 
     # ---------------------------------------------------------- #
     # Definition of the OverShoot (OS) and no-OverShoot (noOS)   #
@@ -174,7 +206,7 @@ def load_GMT(
     from scipy.io import loadmat
 
     # Load GMT_OS
-    mat_data = loadmat(scripts_dir + '/references/lifetime_exposure_wim/lifetime_exposure_wim_v1/GMT_OS.mat', squeeze_me=True)
+    mat_data = loadmat(dir_temperature_trajectories + '/temperature-trajectories_Wim/GMT_OS.mat', squeeze_me=True)
     GMT_OS = mat_data['GMT_OS'].flatten()
     years = np.arange(1960, 1960 + len(GMT_OS))
     df_GMT_OS = pd.Series(GMT_OS, index=years)
@@ -182,7 +214,7 @@ def load_GMT(
     df_GMT_OS.index.name = None
 
     # Load GMT_noOS
-    mat_data = loadmat(scripts_dir + '/references/lifetime_exposure_wim/lifetime_exposure_wim_v1/GMT_noOS.mat', squeeze_me=True)
+    mat_data = loadmat(dir_temperature_trajectories + '/temperature-trajectories_Wim/GMT_noOS.mat', squeeze_me=True)
     GMT_noOS = mat_data['GMT_noOS'].flatten()
     years = np.arange(1960, 1960 + len(GMT_noOS))
     df_GMT_noOS = pd.Series(GMT_noOS, index=years)
@@ -195,397 +227,123 @@ def load_GMT(
     # ---------------------------------------------------------- #
 
     # Open the NetCDF file
-    ds_GMT_STS = xr.open_dataset(data_dir + '/temperature_trajectories_STS/GSAT_FaIR_SPARCCLE_STSv1.nc', engine='netcdf4')
+    ds_GMT_STS = xr.open_dataset(dir_temperature_trajectories + '/temperature-trajectories_STS/GSAT_FaIR_SPARCCLE_STSv1.nc', engine='netcdf4')
 
     # ---------------------------------------------------------- #
-    # Definition of stylized trajectories used in the BE         #
-    # The definition of these trajectories depends on the value  #
-    # of the flags['gmt'] to either used the 'original'          #
-    # trajectories defined in Thiery et al.(2021) or the update  #
-    # based on AR6 by Grant et al.(2025)                         #                                                                           
+    # Definition of stylized trajectories:                       #
+    # 'ar6_new_dem4cli' approach in S2S, which is ar6_new with   #
+    # bug fixes and introducing options for post-2100 extension  #
     # ---------------------------------------------------------- #
-
-    if flags['gmt'] == 'original':
+        
+    # ------------------------- This is original AR6 approach --------------------------
+    # collect new ar6 scens from IASA explorer
+    df_GMT_ar6 = pd.read_csv(dir_temperature_trajectories+'/temperature-trajectories_AR6/ar6_c1_c7_nogaps_2000-2100.csv',header=0)
+    df_GMT_ar6.loc[:,'Model'] = df_GMT_ar6.loc[:,'Model']+'_'+df_GMT_ar6.loc[:,'Scenario']
+    df_GMT_ar6 = df_GMT_ar6.drop(columns=['Scenario','Region','Variable','Unit']).transpose()
+    df_GMT_ar6.columns=df_GMT_ar6.loc['Model',:]
+    df_GMT_ar6.columns.name = None
+    df_GMT_ar6 = df_GMT_ar6.drop(df_GMT_ar6.index[0])
+    df_GMT_ar6 = df_GMT_ar6.dropna(axis=1)
+    df_GMT_ar6.index = df_GMT_ar6.index.astype(int)
+    df_hist_all = df_GMT_15.loc[1960:1999]
+    df_hist_all = pd.concat([df_hist_all for i in range(len(df_GMT_ar6.columns))],axis=1)
+    df_hist_all.columns = df_GMT_ar6.columns
+    df_GMT_ar6 = pd.concat([df_hist_all,df_GMT_ar6],axis=0) # add historical values to additional scenarios
     
-        GMT_max = 3.5
-        GMT_fut_strtyr = int(df_GMT_15.index.where(df_GMT_15==df_GMT_20).max())+1
-        ind_fut_strtyr = int(np.argwhere(np.asarray(df_GMT_15.index)==GMT_fut_strtyr))
-        GMT_min = df_GMT_15.loc[GMT_fut_strtyr-1]
-        GMT_steps = np.arange(0,GMT_max+GMT_inc/2,GMT_inc)
-        GMT_steps = np.insert(GMT_steps[np.where(GMT_steps>GMT_min)],0,GMT_min)
-        n_steps = len(GMT_steps)
-        ind_15 = np.argmin(np.abs(GMT_steps-df_GMT_15.iloc[-1]))
-        ind_20 = np.argmin(np.abs(GMT_steps-df_GMT_20.iloc[-1]))
-        ind_NDC = np.argmin(np.abs(GMT_steps-df_GMT_NDC.iloc[-1]))
-        n_years = len(year_range)
-        trj = np.empty((n_years,n_steps))
-        trj.fill(np.nan)
-        trj[0:ind_fut_strtyr,:] = np.repeat(np.expand_dims(df_GMT_15.loc[:GMT_fut_strtyr-1].values,axis=1),n_steps,axis=1)
-        trj[ind_fut_strtyr:,0] = GMT_min
-        trj[ind_fut_strtyr:,-1] = np.interp(
-            x=year_range[ind_fut_strtyr:],
-            xp=[GMT_fut_strtyr,year_end],
-            fp=[GMT_min,GMT_max],
-        )
-        trj[:,ind_15] = df_GMT_15.values
-        trj[:,ind_20] = df_GMT_20.values
-        trj[:,ind_NDC] = df_GMT_NDC.values
-        trj_msk = np.ma.masked_invalid(trj)
-        [xx, yy] = np.meshgrid(range(n_steps),range(n_years))
-        x1 = xx[~trj_msk.mask]
-        y1 = yy[~trj_msk.mask]
-        trj_interpd = interpolate.griddata(
-            (x1,y1), # only include coords with valid data
-            trj[~trj_msk.mask].ravel(), # inputs are valid only, too
-            (xx,yy), # then provide coordinates of ourput array, which include points where interp is required (not ravelled, so has 154x24 shape)
-        )
-        df_GMT_strj = pd.DataFrame(
-            trj_interpd, 
-            columns=range(n_steps), 
-            index=year_range,
-        )
-        
-    elif flags['gmt'] == 'ar6':
-        
-        # for alternative gmt mapping approaches, collect new ar6 scens from IASA explorer
-        df_GMT_ar6 = pd.read_csv(data_dir+'temperature_trajectories_AR6/ar6_c1_c7_nogaps_2000-2100.csv',header=0)
-        df_GMT_ar6.loc[:,'Model'] = df_GMT_ar6.loc[:,'Model']+'_'+df_GMT_ar6.loc[:,'Scenario']
-        df_GMT_ar6 = df_GMT_ar6.drop(columns=['Scenario','Region','Variable','Unit']).transpose()
-        df_GMT_ar6.columns=df_GMT_ar6.loc['Model',:]
-        df_GMT_ar6.columns.name = None
-        df_GMT_ar6 = df_GMT_ar6.drop(df_GMT_ar6.index[0])
-        df_GMT_ar6 = df_GMT_ar6.dropna(axis=1)
-        df_GMT_ar6.index = df_GMT_ar6.index.astype(int)
-        df_hist_all = df_GMT_15.loc[1960:1999]
-        df_hist_all = pd.concat([df_hist_all for i in range(len(df_GMT_ar6.columns))],axis=1)
-        df_hist_all.columns = df_GMT_ar6.columns
-        df_GMT_ar6 = pd.concat([df_hist_all,df_GMT_ar6],axis=0) # add historical values to additional scenarios
-        
-        if np.nanmax(df_GMT_ar6.index) < year_end: 
-            # repeat average of last 10 years (i.e. end-9 to end ==> 2090:2099)
-            GMT_last_10ymean = df_GMT_ar6.iloc[-10:,:].mean()
-            for year in range(np.nanmax(df_GMT_ar6.index),year_end+1): 
-                df_GMT_ar6 = pd.concat([df_GMT_ar6, pd.DataFrame(GMT_last_10ymean).transpose().rename(index={0:year})]) 
-                
-        # drop dups
-        df_GMT_ar6 = df_GMT_ar6[~df_GMT_ar6.index.duplicated(keep='first')]
+    # drop dups
+    df_GMT_ar6 = df_GMT_ar6[~df_GMT_ar6.index.duplicated(keep='first')]
 
-        # get new trajects
-        df_GMT_lb, df_GMT_15, df_GMT_20, df_GMT_NDC, df_GMT_30, df_GMT_40 = ar6_scen_grab(
-            scen_thresholds,
-            df_GMT_ar6,
-        )        
-        
-        # GMT_max = df_GMT_40.loc[2100]
-        GMT_max = df_GMT_40.iloc[-1]
-        GMT_fut_strtyr = int(df_GMT_15.index.where(df_GMT_15==df_GMT_20).max())+1
-        ind_fut_strtyr = int(np.argwhere(np.asarray(df_GMT_15.index)==GMT_fut_strtyr))
-        GMT_min = df_GMT_lb.loc[GMT_fut_strtyr-1]
-        GMT_steps = np.arange(0,GMT_max+0.05,GMT_inc)
-        GMT_steps = np.insert(GMT_steps[np.where(GMT_steps>GMT_min)],0,GMT_min)
-        n_steps = len(GMT_steps)
-        ind_lb = np.argmin(np.abs(GMT_steps-df_GMT_lb.iloc[-1]))
-        ind_15 = np.argmin(np.abs(GMT_steps-df_GMT_15.iloc[-1]))
-        ind_20 = np.argmin(np.abs(GMT_steps-df_GMT_20.iloc[-1]))
-        ind_NDC = np.argmin(np.abs(GMT_steps-df_GMT_NDC.iloc[-1]))
-        ind_30 = np.argmin(np.abs(GMT_steps-df_GMT_30.iloc[-1]))
-        ind_40 = np.argmin(np.abs(GMT_steps-df_GMT_40.iloc[-1]))
-        indices=[ind_lb,ind_15,ind_20,ind_NDC,ind_30,ind_40]
-        # year_range=np.arange(1960,2100+1)
-        n_years = len(year_range)
-        trj = np.empty((n_years,n_steps))
-        trj.fill(np.nan)
-        trj[0:ind_fut_strtyr,:] = np.repeat(np.expand_dims(df_GMT_15.loc[:GMT_fut_strtyr-1].values,axis=1),n_steps,axis=1)
-        trj[ind_fut_strtyr:,0] = GMT_min
-        trj[ind_fut_strtyr:,-1] = np.interp(
-            x=year_range[ind_fut_strtyr:],
-            xp=[GMT_fut_strtyr,year_end],
-            fp=[GMT_min,GMT_max],
-        )
-        trj[:,ind_lb] = df_GMT_lb.values
-        trj[:,ind_15] = df_GMT_15.values
-        trj[:,ind_20] = df_GMT_20.values
-        trj[:,ind_NDC] = df_GMT_NDC.values
-        trj[:,ind_30] = df_GMT_30.values
-        trj[:,ind_40] = df_GMT_40.values
-        trj_msk = np.ma.masked_invalid(trj)
-        [xx, yy] = np.meshgrid(range(n_steps),range(n_years))
-        x1 = xx[~trj_msk.mask]
-        y1 = yy[~trj_msk.mask]
-        trj_interpd = interpolate.griddata(
-            (x1,y1), # only include coords with valid data
-            trj[~trj_msk.mask].ravel(), # inputs are valid only, too
-            (xx,yy), # then provide coordinates of ourput array, which include points where interp is required (not ravelled, so has 154x24 shape)
-        )
-        df_GMT_strj = pd.DataFrame(
-            trj_interpd, 
-            columns=range(n_steps), 
-            index=year_range,
-        )
-        
-    elif flags['gmt'] == 'ar6_new':
-        
-        # ------------------------- This is original AR6 approach --------------------------
-        # for alternative gmt mapping approaches, collect new ar6 scens from IASA explorer
-        df_GMT_ar6 = pd.read_csv(data_dir+'temperature_trajectories_AR6/ar6_c1_c7_nogaps_2000-2100.csv',header=0)
-        df_GMT_ar6.loc[:,'Model'] = df_GMT_ar6.loc[:,'Model']+'_'+df_GMT_ar6.loc[:,'Scenario']
-        df_GMT_ar6 = df_GMT_ar6.drop(columns=['Scenario','Region','Variable','Unit']).transpose()
-        df_GMT_ar6.columns=df_GMT_ar6.loc['Model',:]
-        df_GMT_ar6.columns.name = None
-        df_GMT_ar6 = df_GMT_ar6.drop(df_GMT_ar6.index[0])
-        df_GMT_ar6 = df_GMT_ar6.dropna(axis=1)
-        df_GMT_ar6.index = df_GMT_ar6.index.astype(int)
-        df_hist_all = df_GMT_15.loc[1960:1999]
-        df_hist_all = pd.concat([df_hist_all for i in range(len(df_GMT_ar6.columns))],axis=1)
-        df_hist_all.columns = df_GMT_ar6.columns
-        df_GMT_ar6 = pd.concat([df_hist_all,df_GMT_ar6],axis=0) # add historical values to additional scenarios
-        
-        if np.nanmax(df_GMT_ar6.index) < year_end: 
-            # repeat average of last 10 years (i.e. end-9 to end ==> 2090:2099)
-            GMT_last_10ymean = df_GMT_ar6.iloc[-10:,:].mean()
-            for year in range(np.nanmax(df_GMT_ar6.index),year_end+1): 
-                df_GMT_ar6 = pd.concat([df_GMT_ar6, pd.DataFrame(GMT_last_10ymean).transpose().rename(index={0:year})]) 
-                
-        # drop dups
-        df_GMT_ar6 = df_GMT_ar6[~df_GMT_ar6.index.duplicated(keep='first')]
+    # get new trajects - this overwrites the above df_GMT_15
+    df_GMT_lb, df_GMT_15, df_GMT_20, df_GMT_NDC, df_GMT_30, df_GMT_40 = ar6_scen_grab(
+        scen_thresholds,
+        df_GMT_ar6,
+    )        
 
-        # get new trajects
-        df_GMT_lb, df_GMT_15, df_GMT_20, df_GMT_NDC, df_GMT_30, df_GMT_40 = ar6_scen_grab(
-            scen_thresholds,
-            df_GMT_ar6,
-        )        
-        
-        # GMT_max = df_GMT_40.loc[2100]
-        GMT_max = df_GMT_40.iloc[-1]
-        GMT_fut_strtyr = int(df_GMT_15.index.where(df_GMT_15==df_GMT_20).max())+1
-        ind_fut_strtyr = int(np.argwhere(np.asarray(df_GMT_15.index)==GMT_fut_strtyr))
-        GMT_min = df_GMT_lb.loc[GMT_fut_strtyr-1]
-        GMT_steps = np.arange(0,GMT_max+0.05,GMT_inc)
-        GMT_steps = np.insert(GMT_steps[np.where(GMT_steps>GMT_min)],0,GMT_min)
-        n_steps = len(GMT_steps)
-        ind_lb = np.argmin(np.abs(GMT_steps-df_GMT_lb.iloc[-1]))
-        ind_15 = np.argmin(np.abs(GMT_steps-df_GMT_15.iloc[-1]))
-        ind_20 = np.argmin(np.abs(GMT_steps-df_GMT_20.iloc[-1]))
-        ind_NDC = np.argmin(np.abs(GMT_steps-df_GMT_NDC.iloc[-1]))
-        ind_30 = np.argmin(np.abs(GMT_steps-df_GMT_30.iloc[-1]))
-        ind_40 = np.argmin(np.abs(GMT_steps-df_GMT_40.iloc[-1]))
-        indices=[ind_lb,ind_15,ind_20,ind_NDC,ind_30,ind_40]
-        # year_range=np.arange(1960,2100+1)
-        n_years = len(year_range)
-        trj = np.empty((n_years,n_steps))
-        trj.fill(np.nan)
-        trj[0:ind_fut_strtyr,:] = np.repeat(np.expand_dims(df_GMT_15.loc[:GMT_fut_strtyr-1].values,axis=1),n_steps,axis=1)
-        trj[ind_fut_strtyr:,0] = GMT_min
-        trj[ind_fut_strtyr:,-1] = np.interp(
-            x=year_range[ind_fut_strtyr:],
-            xp=[GMT_fut_strtyr,year_end],
-            fp=[GMT_min,GMT_max],
-        )
-        trj[:,ind_lb] = df_GMT_lb.values
-        trj[:,ind_15] = df_GMT_15.values
-        trj[:,ind_20] = df_GMT_20.values
-        trj[:,ind_NDC] = df_GMT_NDC.values
-        trj[:,ind_30] = df_GMT_30.values
-        trj[:,ind_40] = df_GMT_40.values
-        trj_msk = np.ma.masked_invalid(trj)
-        [xx, yy] = np.meshgrid(range(n_steps),range(n_years))
-        x1 = xx[~trj_msk.mask]
-        y1 = yy[~trj_msk.mask]
-        trj_interpd = interpolate.griddata(
-            (x1,y1), # only include coords with valid data
-            trj[~trj_msk.mask].ravel(), # inputs are valid only, too
-            (xx,yy), # then provide coordinates of ourput array, which include points where interp is required (not ravelled, so has 154x24 shape)
-        )
-        df_GMT_strj = pd.DataFrame(
-            trj_interpd, 
-            columns=range(n_steps), 
-            index=year_range,
-        )        
-        
-        # ------------------------- End of original AR6 approach --------------------------
-        
-        # Below we adapt for clean, 0.1 deg intervals between only 1.5 to 3.5 to speed up analysis
-        df_GMT_strj
-        GMT_min=1.5
-        GMT_max=3.5
-        GMT_steps = np.arange(GMT_min,GMT_max+0.05,GMT_inc)
-        n_steps = len(GMT_steps)
-        n_years = len(year_range)
-        trj = np.empty((n_years,n_steps))
-        trj.fill(np.nan)
+    GMT_max = df_GMT_40.iloc[-1]
+    GMT_fut_strtyr = int(df_GMT_15.index.where(df_GMT_15==df_GMT_20).max())+1
+    ind_fut_strtyr = int(np.argwhere(np.asarray(df_GMT_15.index)==GMT_fut_strtyr))
+    GMT_min = df_GMT_lb.loc[GMT_fut_strtyr-1]
+    GMT_steps = np.arange(0,GMT_max+0.05,GMT_inc)
+    GMT_steps = np.insert(GMT_steps[np.where(GMT_steps>GMT_min)],0,GMT_min)
+    n_steps = len(GMT_steps)
+    ind_lb = np.argmin(np.abs(GMT_steps-df_GMT_lb.iloc[-1]))
+    ind_15 = np.argmin(np.abs(GMT_steps-df_GMT_15.iloc[-1]))
+    ind_20 = np.argmin(np.abs(GMT_steps-df_GMT_20.iloc[-1]))
+    ind_NDC = np.argmin(np.abs(GMT_steps-df_GMT_NDC.iloc[-1]))
+    ind_30 = np.argmin(np.abs(GMT_steps-df_GMT_30.iloc[-1]))
+    ind_40 = np.argmin(np.abs(GMT_steps-df_GMT_40.iloc[-1]))
+    indices=[ind_lb,ind_15,ind_20,ind_NDC,ind_30,ind_40]
+    year_range=np.arange(1960,2100+1) # ROSA so that extrapolation happens after stylized traj are created
+    n_years = len(year_range)
+    trj = np.empty((n_years,n_steps))
+    trj.fill(np.nan)
+    trj[0:ind_fut_strtyr,:] = np.repeat(np.expand_dims(df_GMT_15.loc[:GMT_fut_strtyr-1].values,axis=1),n_steps,axis=1)
+    trj[ind_fut_strtyr:,0] = GMT_min
+    trj[ind_fut_strtyr:,-1] = np.interp(
+        x=year_range[ind_fut_strtyr:],
+        xp=[GMT_fut_strtyr,year_range[-1]], 
+        fp=[GMT_min,GMT_max],
+    )
+    trj[:,ind_lb] = df_GMT_lb.values
+    trj[:,ind_15] = df_GMT_15.values
+    trj[:,ind_20] = df_GMT_20.values
+    trj[:,ind_NDC] = df_GMT_NDC.values
+    trj[:,ind_30] = df_GMT_30.values
+    trj[:,ind_40] = df_GMT_40.values
+    trj_msk = np.ma.masked_invalid(trj)
+    [xx, yy] = np.meshgrid(range(n_steps),range(n_years))
+    x1 = xx[~trj_msk.mask]
+    y1 = yy[~trj_msk.mask]
+    trj_interpd = interpolate.griddata(
+        (x1,y1), # only include coords with valid data
+        trj[~trj_msk.mask].ravel(), # inputs are valid only, too
+        (xx,yy), # then provide coordinates of ourput array, which include points where interp is required (not ravelled, so has 154x24 shape)
+    )
+    df_GMT_strj = pd.DataFrame(
+        trj_interpd, 
+        columns=range(n_steps), 
+        index=year_range,
+    )        
 
-        GMT_fut_strtyr = int(df_GMT_15.index.where(df_GMT_15==df_GMT_20).max())+1
-        ind_fut_strtyr = int(np.argwhere(np.asarray(df_GMT_15.index)==GMT_fut_strtyr))
+    # ------------------------- End of original AR6 approach --------------------------
+    
+    # # Rosa: note that forcing the GMT in 2100 manually causes discontinuity
+    # modified it to fix this below, the 1.5 and 3.5 limits are now conditions of the interpolation 
 
-        # new 1.5 degree as avg between pathways that hit 1.44 and 1.55 at 2100 and then fix 2100 year
-        df_GMT_15_new = df_GMT_strj.loc[:,5:6].mean(axis=1)
-        df_GMT_15_new[2100] = GMT_min
+    # Desired GMT range and steps
+    GMT_min = 1.5
+    GMT_max = 3.5
+    GMT_steps = np.round(np.arange(GMT_min, GMT_max + 0.001, 0.1), 2)
+    n_years = len(df_GMT_strj)
 
-        # new 3.5 degree
-        df_GMT_35_new = df_GMT_strj.loc[:,24]
-        df_GMT_35_new[2100] = GMT_max
+    # Extract the GMT values corresponding to each original column in df_GMT_strj
+    # Suppose the original GMT levels are known — e.g.,:
+    orig_GMT_levels = GMT_steps_all = np.round(df_GMT_strj.loc[2100].values, 2)  # or however you originally set them
 
-        # 
-        trj[0:ind_fut_strtyr,:] = np.repeat(np.expand_dims(df_GMT_15.loc[:GMT_fut_strtyr-1].values,axis=1),n_steps,axis=1)
-        trj[:,0] = df_GMT_15_new
-        trj[:,-1] = df_GMT_35_new
+    # Filter to retain only the columns within the 1.5–3.5°C range
+    keep_cols = np.where((orig_GMT_levels >= GMT_min) & (orig_GMT_levels <= GMT_max))[0]
+    df_GMT_strj_filtered = df_GMT_strj.iloc[:, keep_cols]
+    orig_GMT_levels_filtered = orig_GMT_levels[keep_cols]
 
-        trj_msk_new = np.ma.masked_invalid(trj)
-        [xx, yy] = np.meshgrid(range(n_steps),range(n_years))
-        x1 = xx[~trj_msk_new.mask]
-        y1 = yy[~trj_msk_new.mask]
-        trj_interpd_new = interpolate.griddata(
-            (x1,y1), # only include coords with valid data
-            trj[~trj_msk_new.mask].ravel(), # inputs are valid only, too
-            (xx,yy), # then provide coordinates of ourput array, which include points where interp is required (not ravelled, so has 154x24 shape)
-        )
-        df_GMT_strj_new = pd.DataFrame(
-            trj_interpd_new, 
-            columns=range(n_steps), 
-            index=year_range,
-        )       
-        df_GMT_strj = cp(df_GMT_strj_new) 
+    # Interpolate across GMT dimension for each year
+    df_GMT_strj_clean = pd.DataFrame(index=df_GMT_strj.index, columns=GMT_steps)
+    for yr in df_GMT_strj.index:
+        yvals = df_GMT_strj_filtered.loc[yr].values
+        df_GMT_strj_clean.loc[yr] = np.interp(GMT_steps, orig_GMT_levels_filtered, yvals)
 
+    # Now df_GMT_strj_clean has smooth trajectories that end at 1.5–3.5°C in 2100
 
+    df_GMT_strj = cp(df_GMT_strj_clean)  
 
-    elif flags['gmt'] == 'ar6_new_dem4cli':
-        
-        # ------------------------- This is original AR6 approach --------------------------
-        # for alternative gmt mapping approaches, collect new ar6 scens from IASA explorer
-        df_GMT_ar6 = pd.read_csv(data_dir+'temperature_trajectories_AR6/ar6_c1_c7_nogaps_2000-2100.csv',header=0)
-        df_GMT_ar6.loc[:,'Model'] = df_GMT_ar6.loc[:,'Model']+'_'+df_GMT_ar6.loc[:,'Scenario']
-        df_GMT_ar6 = df_GMT_ar6.drop(columns=['Scenario','Region','Variable','Unit']).transpose()
-        df_GMT_ar6.columns=df_GMT_ar6.loc['Model',:]
-        df_GMT_ar6.columns.name = None
-        df_GMT_ar6 = df_GMT_ar6.drop(df_GMT_ar6.index[0])
-        df_GMT_ar6 = df_GMT_ar6.dropna(axis=1)
-        df_GMT_ar6.index = df_GMT_ar6.index.astype(int)
-        df_hist_all = df_GMT_15.loc[1960:1999]
-        df_hist_all = pd.concat([df_hist_all for i in range(len(df_GMT_ar6.columns))],axis=1)
-        df_hist_all.columns = df_GMT_ar6.columns
-        df_GMT_ar6 = pd.concat([df_hist_all,df_GMT_ar6],axis=0) # add historical values to additional scenarios
-        
-        # if np.nanmax(df_GMT_ar6.index) < year_end:  # left for testing to see what happens if you extrapolate on orginal ar6 scenarios with 3 new methods # TODO: delete once no longer needed
-            
-        #     if flags['gmt_extend'] == '10yrmean':
-        #         # repeat average of last 10 years (i.e. end-9 to end ==> 2090:2099) # ORIGINAL
-        #         # Rosa: not great, better to do this overwrite directly of the stylized trajectory at the end?
-        #         GMT_last_10ymean = df_GMT_ar6.iloc[-10:,:].mean()
-        #         for year in range(np.nanmax(df_GMT_ar6.index),year_end+1): 
-        #             df_GMT_ar6 = pd.concat([df_GMT_ar6, pd.DataFrame(GMT_last_10ymean).transpose().rename(index={0:year})]) 
-            
-        #     elif flags['gmt_extend'] == 'lastyear':
-        #         # ROSA: modify so the last single year value is repeated, not the last 10 years mean
-        #         GMT_last_year = df_GMT_ar6.iloc[-1,:]    
-        #         for year in range(np.nanmax(df_GMT_ar6.index),year_end+1): 
-        #             df_GMT_last_year = pd.DataFrame(GMT_last_year).transpose()
-        #             df_GMT_ar6 = pd.concat([df_GMT_ar6, df_GMT_last_year.rename(index={df_GMT_last_year.index[0]:year})]) 
-        
-        #     # ROSA testing: extrapolate last 10 year trend of each scenario
-        #     elif flags['gmt_extend'] == '10yrtrend': 
-        #         max_year = df_GMT_ar6.index.max()
-        #         yrs = np.arange(max_year - 9, max_year + 1)
-        #         trend = {s: np.polyfit(yrs, df_GMT_ar6.loc[yrs, s].astype(float), 1) for s in df_GMT_ar6.columns}
-        #         future = {
-        #             y: {s: np.polyval(trend[s], y) for s in df_GMT_ar6.columns}
-        #             for y in range(max_year + 1, year_end + 1)
-        #         }
-        #         df_GMT_ar6 = pd.concat([df_GMT_ar6, pd.DataFrame.from_dict(future, orient="index")])
-       
-        # drop dups
-        df_GMT_ar6 = df_GMT_ar6[~df_GMT_ar6.index.duplicated(keep='first')]
+    # ROSA: Do the extrapolation past 2100 here after construction of stylized trajectories 
+    # instead of on the original AR6 scenarios - better especially for 10-year trend extension
 
+    def extend_past_2100(df):
 
-        # get new trajects
-        df_GMT_lb, df_GMT_15, df_GMT_20, df_GMT_NDC, df_GMT_30, df_GMT_40 = ar6_scen_grab(
-            scen_thresholds,
-            df_GMT_ar6,
-        )        
-        
-        # GMT_max = df_GMT_40.loc[2100]
-        GMT_max = df_GMT_40.iloc[-1]
-        GMT_fut_strtyr = int(df_GMT_15.index.where(df_GMT_15==df_GMT_20).max())+1
-        ind_fut_strtyr = int(np.argwhere(np.asarray(df_GMT_15.index)==GMT_fut_strtyr))
-        GMT_min = df_GMT_lb.loc[GMT_fut_strtyr-1]
-        GMT_steps = np.arange(0,GMT_max+0.05,GMT_inc)
-        GMT_steps = np.insert(GMT_steps[np.where(GMT_steps>GMT_min)],0,GMT_min)
-        n_steps = len(GMT_steps)
-        ind_lb = np.argmin(np.abs(GMT_steps-df_GMT_lb.iloc[-1]))
-        ind_15 = np.argmin(np.abs(GMT_steps-df_GMT_15.iloc[-1]))
-        ind_20 = np.argmin(np.abs(GMT_steps-df_GMT_20.iloc[-1]))
-        ind_NDC = np.argmin(np.abs(GMT_steps-df_GMT_NDC.iloc[-1]))
-        ind_30 = np.argmin(np.abs(GMT_steps-df_GMT_30.iloc[-1]))
-        ind_40 = np.argmin(np.abs(GMT_steps-df_GMT_40.iloc[-1]))
-        indices=[ind_lb,ind_15,ind_20,ind_NDC,ind_30,ind_40]
-        year_range=np.arange(1960,2100+1) # ROSA Testing 
-        n_years = len(year_range)
-        trj = np.empty((n_years,n_steps))
-        trj.fill(np.nan)
-        trj[0:ind_fut_strtyr,:] = np.repeat(np.expand_dims(df_GMT_15.loc[:GMT_fut_strtyr-1].values,axis=1),n_steps,axis=1)
-        trj[ind_fut_strtyr:,0] = GMT_min
-        trj[ind_fut_strtyr:,-1] = np.interp(
-            x=year_range[ind_fut_strtyr:],
-            xp=[GMT_fut_strtyr,year_range[-1]], # was year_end
-            fp=[GMT_min,GMT_max],
-        )
-        trj[:,ind_lb] = df_GMT_lb.values
-        trj[:,ind_15] = df_GMT_15.values
-        trj[:,ind_20] = df_GMT_20.values
-        trj[:,ind_NDC] = df_GMT_NDC.values
-        trj[:,ind_30] = df_GMT_30.values
-        trj[:,ind_40] = df_GMT_40.values
-        trj_msk = np.ma.masked_invalid(trj)
-        [xx, yy] = np.meshgrid(range(n_steps),range(n_years))
-        x1 = xx[~trj_msk.mask]
-        y1 = yy[~trj_msk.mask]
-        trj_interpd = interpolate.griddata(
-            (x1,y1), # only include coords with valid data
-            trj[~trj_msk.mask].ravel(), # inputs are valid only, too
-            (xx,yy), # then provide coordinates of ourput array, which include points where interp is required (not ravelled, so has 154x24 shape)
-        )
-        df_GMT_strj = pd.DataFrame(
-            trj_interpd, 
-            columns=range(n_steps), 
-            index=year_range,
-        )        
+        if isinstance(df, pd.Series):
+            df = df.to_frame()
+            df.columns = [str(round(df.loc[2100].values[0], 1))] # name based on rounded value in 2100
 
-
-        # ------------------------- End of original AR6 approach --------------------------
-        
-        # ------------------------- NEW ROSA --------------------------
-
-        # # Rosa: note that forcing the GMT in 2100 manual causes jump discontinuity
-        # modified it to fix this below, the 1.5 and 3.5 limits are now conditions of the interpolation 
-
-        # Desired GMT range and steps
-        GMT_min = 1.5
-        GMT_max = 3.5
-        GMT_steps = np.round(np.arange(GMT_min, GMT_max + 0.001, 0.1), 2)
-        n_years = len(df_GMT_strj)
-
-        # Extract the GMT values corresponding to each original column in df_GMT_strj
-        # Suppose the original GMT levels are known — e.g.,:
-        orig_GMT_levels = GMT_steps_all = np.round(df_GMT_strj.loc[2100].values, 2)  # or however you originally set them
-
-        # Filter to retain only the columns within the 1.5–3.5°C range
-        keep_cols = np.where((orig_GMT_levels >= GMT_min) & (orig_GMT_levels <= GMT_max))[0]
-        df_GMT_strj_filtered = df_GMT_strj.iloc[:, keep_cols]
-        orig_GMT_levels_filtered = orig_GMT_levels[keep_cols]
-
-        # Interpolate across GMT dimension for each year
-        df_GMT_strj_clean = pd.DataFrame(index=df_GMT_strj.index, columns=GMT_steps)
-        for yr in df_GMT_strj.index:
-            yvals = df_GMT_strj_filtered.loc[yr].values
-            df_GMT_strj_clean.loc[yr] = np.interp(GMT_steps, orig_GMT_levels_filtered, yvals)
-
-        # Now df_GMT_strj_clean has smooth trajectories that end at 1.5–3.5°C in 2100
-
-        df_GMT_strj = cp(df_GMT_strj_clean)  
-
-        # ROSA: Do the extrapolation past 2100 here after construction of stylized trajectories 
-        # instead of on the original AR6 scenarios - better especially for 10-year trend extension
-
-        df = df_GMT_strj
         if np.nanmax(df.index) < year_end: 
             
             if flags['gmt_extend'] == '10yrmean':
@@ -613,43 +371,10 @@ def load_GMT(
                 }
                 df = pd.concat([df, pd.DataFrame.from_dict(future, orient="index")])
 
+        return df
 
-        df_GMT_strj = cp(df)
-        
+    df_GMT_strj = extend_past_2100(df_GMT_strj)
 
-
-    # pickles GMT #
-
-    if flags['gmt']=='ar6_new' or flags['gmt']=='ar6_new_dem4cli':
-
-        pass # Rosa have to pass/comment out for permissions - could change 'data_dir' to something else
-
-        with open(data_dir+'temperature_trajectories_AR6/df_GMT_strj.pkl', 'wb') as f:
-            pk.dump(df_GMT_strj,f)
-
-        with open(data_dir+'temperature_trajectories_STS/ds_GMT_STS.pkl', 'wb') as f:
-            ds_GMT_STS.to_netcdf(data_dir+'temperature_trajectories_STS/ds_GMT_STS.nc')
-
-    if flags['gmt']=='original':
-
-        pass # Rosa have to pass/comment out for permissions - could change 'data_dir' to something else
-
-        with open(data_dir+'temperature_trajectories_SR15/df_GMT_15.pkl', 'wb') as f:
-            pk.dump(df_GMT_15,f)
-
-        with open(data_dir+'temperature_trajectories_SR15/df_GMT_20.pkl', 'wb') as f:
-            pk.dump(df_GMT_20,f)
-
-        with open(data_dir+'temperature_trajectories_SR15/df_GMT_NDC.pkl', 'wb') as f:
-            pk.dump(df_GMT_NDC,f)
-        
-        with open(data_dir+'temperature_trajectories_SR15/df_GMT_OS.pkl', 'wb') as f:
-            pk.dump(df_GMT_OS,f)
-        
-        with open(data_dir+'temperature_trajectories_UVIC/df_GMT_noOS.pkl', 'wb') as f:
-            pk.dump(df_GMT_noOS,f)
-
-        with open(data_dir+'temperature_trajectories_UVIC/df_GMT_strj.pkl', 'wb') as f:
-            pk.dump(df_GMT_strj,f)
-
+    df_GMT_NDC = extend_past_2100(df_GMT_NDC)
+    
     return df_GMT_15, df_GMT_20, df_GMT_NDC, df_GMT_OS, df_GMT_noOS, ds_GMT_STS, df_GMT_strj

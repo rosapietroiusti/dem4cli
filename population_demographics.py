@@ -27,8 +27,7 @@ import warnings
 import openpyxl 
 
 
-script_dir = os.path.abspath( os.path.dirname( __file__ ) )
-
+from settings import *
 
 # flag 
 
