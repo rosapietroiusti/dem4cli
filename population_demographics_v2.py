@@ -103,14 +103,16 @@ def load_country_stats(
 
 
 def load_cohort_sizes( 
-    filepaths_wcde = [os.path.join(script_dir, 'data/cohort-sizes/WCDE/wicdf_ssp1.csv'), 
-                      os.path.join(script_dir, 'data/cohort-sizes/WCDE/wicdf_ssp2.csv'), 
-                      os.path.join(script_dir, 'data/cohort-sizes/WCDE/wicdf_ssp3.csv')],
-                      ssp = 2,
-                      by_sex = False
+    dir_cohortsizes = dir_cohortsizes,
+    ssp = 2,
+    by_sex = False
 ):
     """
-    load population size per age cohort from Wittgenstein Center Data Explorer (source: http://dataexplorer.wittgensteincentre.org/wcde-v2/)
+    load population size per age cohort from Wittgenstein Center Data Explorer.
+    
+    Version 1: (source: http://dataexplorer.wittgensteincentre.org/wcde-v2/)
+
+    Version 2: version 3.2 beta (for CMIP7)
 
     data description: Population Size (000's)
     De facto population in a country or region, classified by sex and by five-year age groups. Available in all scenarios and at all geographical scales. For each country data is sorted first by age cohort (0-4, 4-9...). So all the first data refers to the 0-4 age cohort. 
@@ -119,12 +121,13 @@ def load_cohort_sizes(
     
     Input
         filepaths_wcde (str): path to csv files for different ssps
-        sel_ssp (int): 1,2 or 3 for ssp1, ssp2, ssp3
-        by_sex (Bool): TODO (data is available male/female)
+        ssp (int): 1,2 or 3 for ssp1, ssp2, ssp3
+        by_sex (Bool): TODO (data is available male/female) - in version 2 this is automatic
 
     Returns
         df_cohort_sizes (df): rows are countries, columns are a cohort's (e.g. age=2) 
-                                size each year, then the next cohort (columns labelled e.g. 2_1950 age=2, year=1950)
+                                size each year, then the next cohort (columns labelled e.g. 2_1950 age=2, year=1950) 
+                                (version 1, in version 2 its a self-explanatory data array)
         ages (arr) : central year of interval (2,7...102)
         years (arr) : years we have data for (1950, 1955...2100)
     """
@@ -133,48 +136,95 @@ def load_cohort_sizes(
         if age == '100+':
             return 100
         else:
-            match = re.match(r'(\d+)--\d+', age)
+            match = re.match(r'(\d+)-{1,2}(\d+)', age)
             if match:
                 return int(match.group(1))
             else:
                 return int(age)
             
 
-    # open wcde cohort size file 
-    filepath = filepaths_wcde[ssp-1]
-    df_raw = pd.read_csv(filepath, header=7) # population is in 000's
+    if flags['version'] == 1:
 
-    # total national population through time (rows = countries with names from WCDE, check they match, columns = years)
-    df_pop_national = df_raw[(df_raw['Sex'] == 'Both') & (df_raw['Age'] == 'All')][['Area', 'Year', 'Population']].pivot(index="Area", columns="Year", values="Population")
+        # open wcde cohort size file 
+        filepath = dir_cohortsizes+f'/wicdf_ssp{ssp}.csv'
+        df_raw = pd.read_csv(filepath, header=7) # population is in 000's
 
-    # cohort size specific
-    if by_sex == False:
+        # cohort size specific
+        if not by_sex:
 
-        # select only relevant rows and cols
-        df = df_raw[(df_raw['Sex'] == 'Both') & (df_raw['Age'] != 'All')][['Area', 'Year', 'Age', 'Population']]
-        
+            # select only relevant rows and cols
+            df = df_raw[(df_raw['Sex'] == 'Both') & (df_raw['Age'] != 'All')][['Area', 'Year', 'Age', 'Population']]
+            
+            # central year in age bracket e.g. 0-4 becomes 2, 5-9 becomes 7 
+            df['Age'] = df['Age'].apply(convert_age_range) + 2 
+                
+            # Initialize an empty DataFrame for the final result
+            df_cohort_sizes = pd.DataFrame()
+            # Get unique ages
+            ages = df['Age'].unique()
+            years = df['Year'].unique()
+            
+            # Loop through each age and pivot the data
+            for age in ages:
+                subset = df[df['Age'] == age].pivot(index='Area', columns='Year', values='Population')
+                subset.columns = [f'{age}_{year}' for year in subset.columns] # name the columns e.g. 2_1950
+                if df_cohort_sizes.empty:
+                    df_cohort_sizes = subset
+                else:
+                    df_cohort_sizes = df_cohort_sizes.join(subset, how='outer')
+
+        else:
+            pass
+            # TO DEVELOP ! BY SEX ! 
+
+    elif flags['version'] == 2:
+
+        filepath = dir_cohortsizes+f'/ssp_basic_drivers_release_3.2.beta_full.xlsx'
+        df = pd.read_excel(filepath, sheet_name=1)
+
+        # Exclude rows where 'region' contains (R<number>), i.e. world regions
+        df = df[~df['Region'].str.contains(r"\(R\d+\)", regex=True, na=False)]
+
+        # Keep only "Population|Male|Age <age>" or "Population|Female|Age <age>"
+        population_pattern = (r"^Population\|(Male|Female)\|Age\s(\d{1,2}(-\d{1,2})?|100\+)$")
+        df = df[df['Variable'].str.contains(population_pattern, regex=True, na=False)]
+
+        # Extract sex and age from Variable
+        df['sex'] = df['Variable'].str.extract(r"^Population\|(Male|Female)", expand=False)
+        df['age'] = df['Variable'].str.extract(r"Age\s([\d\+]+(?:-\d+)?)", expand=False)
+
+        # Melt year columns to long format
+        year_cols = [c for c in df.columns if re.match(r"^\d{4}$", str(c))]
+        df_long = df.melt(
+            id_vars=['Region', 'sex', 'age','Scenario'],
+            value_vars=year_cols,
+            var_name='time',
+            value_name='population'
+        )
+        # clean 
+        df_long['time'] = df_long['time'].astype(int)
+        df_long['Scenario'] = df_long['Scenario'].replace({'Historical Reference': 'historical'})
+
         # central year in age bracket e.g. 0-4 becomes 2, 5-9 becomes 7 
-        df['Age'] = df['Age'].apply(convert_age_range) + 2 
-              
-        # Initialize an empty DataFrame for the final result
-        df_cohort_sizes = pd.DataFrame()
-        # Get unique ages
-        ages = df['Age'].unique()
-        years = df['Year'].unique()
-        
-        # Loop through each age and pivot the data
-        for age in ages:
-            subset = df[df['Age'] == age].pivot(index='Area', columns='Year', values='Population')
-            subset.columns = [f'{age}_{year}' for year in subset.columns] # name the columns e.g. 2_1950
-            if df_cohort_sizes.empty:
-                df_cohort_sizes = subset
-            else:
-                df_cohort_sizes = df_cohort_sizes.join(subset, how='outer')
+        df_long['age'] = df_long['age'].apply(convert_age_range) + 2 
 
-    else:
-        pass
-        # TO DEVELOP ! BY SEX ! 
-    
+        # make into a data array for easy indexing 
+        da = df_long.set_index(['Region', 'time', 'age', 'sex', 'Scenario']).to_xarray()['population']
+        da = da.rename({'Region':'country', 'Scenario':'ssp'})
+
+        # select SSP and merge historical + SSP
+        da = da.sel(ssp=['historical', f'SSP{ssp}']).max(dim="ssp")
+
+        # get ages and years
+        ages = da.age.values
+        years = da.time.values
+
+        if not by_sex:
+            da = da.sum(dim='sex') # in the alternative it doesnt really get used anyway... 
+
+        df_cohort_sizes = da 
+        # note its a da not a df !!! TODO: change the version 1 so it also gives a da? or rename this to cohortsizes_raw or something! 
+
     return df_cohort_sizes, ages, years
 
 
@@ -211,35 +261,47 @@ def interpolate_cohortsize_countries(
             y_corrected = np.nansum(np.dstack((y_values,-delta_i)),2).reshape(-1)
             
         return y_corrected
-    
-    # unpack loaded wcde values
-    wcde_years, wcde_ages, wcde_country_data = cohort_years, cohort_ages, df_cohort_size_filter.values #.iloc[:,2:]
+
+    if flags ['version'] == 1 : 
+        wcde_years, wcde_ages, wcde_country_data = cohort_years, cohort_ages, df_cohort_size_filter.values 
+        countries = df_cohort_size_filter.index
+
+    elif flags ['version'] == 2 : 
+        wcde_years, wcde_ages = cohort_years, cohort_ages
+        countries = df_cohort_size_filter.country.values # its not a df its a da in v2! 
     
     # initialise dictionary to store cohort sizes dataframes per country with years as rows and ages as columns
     d_cohort_size = {}
     
     # loop over countries
     print('interpolating cohort sizes per country')
-    for i,name in enumerate(df_cohort_size_filter.index):
+    for i,name in enumerate(countries):
         # extract population size per age cohort data from WCDE file and linearly interpolate from 5-year WCDE blocks to pre-defined birth year
-        wcde_per_country = np.reshape(wcde_country_data[i,:],((len(wcde_ages),len(wcde_years)))) 
-        # every row is an age cohort (len 21), every column is a year (len 31)
-        # use dataframes to do reindexing and interpolation (see how much slower this makes it cfr. to numpy - could do with numpy interpolate.griddata if you accept that ages 0-2 are not interpolated but held constant - decide what assumption we want to use!) 
-        wcde_per_country_df = pd.DataFrame(
-            wcde_per_country,
-            index=wcde_ages,
-            columns=wcde_years
-        )
-    
-        #set new coordinates after interpolation - check you want this & put in flags at start or something !! 
-        ages_interpn_cohorts =  np.arange(0,105) # ISSUE: understand if OK np.arange(104,-1,-1) #np.arange(100,-1,-1) # new_ages in luke's script (prev: np.arange(0,105))
+        
+        if flags ['version'] == 1 : 
+            wcde_per_country = np.reshape(wcde_country_data[i,:],((len(wcde_ages),len(wcde_years)))) 
+            wcde_per_country_df = pd.DataFrame(
+                wcde_per_country,
+                index=wcde_ages,
+                columns=wcde_years
+            )
+        elif flags ['version'] == 2 : 
+            wcde_per_country_df = df_cohort_size_filter.sel(country=name).to_pandas().T
+            # every row is an age group (len 21), every column is a year (len 31)
+
+        # Note: now using dataframes to do reindexing and interpolation (see how much slower this makes it cfr. to numpy
+        # could do with numpy interpolate.griddata if you accept that ages 0-2 are not interpolated but held constant 
+        # decide what assumption we want to use!) 
+
+        #set new coordinates for after interpolation - check you want this & put in flags at start or something !! 
+        ages_interpn_cohorts =  np.arange(0,105) 
         years_interpn_cohorts = np.arange(1950,2100+1)
     
         # interpolate per ages
         wcde_per_country_df = wcde_per_country_df.reindex(ages_interpn_cohorts)
         wcde_per_country_df
         wcde_per_country_intrp = wcde_per_country_df.astype('float').interpolate(
-                method='slinear', # original 'linear' filled end values with constants; slinear calls spline linear interp/extrap from scipy interp1d
+                method='slinear', # original 'linear' filled end values with constants; slinear calls spline linear interp/extrap from scipy interp1d - check if this is ok 
                 limit_direction='both',
                 fill_value='extrapolate',
                 axis=0
@@ -259,7 +321,7 @@ def interpolate_cohortsize_countries(
             print('after interpolation and mean-preserving correction there are some neg numbers in {}, {}, setting them to zero'.format(i,name))
             # set them to zero
             wcde_per_country_intrp_correct[wcde_per_country_intrp_correct<0]=0
-            # TODO: modify distribute_error_across_years to not reintroduce negative numbers 
+            # TODO: modify distribute_error_across_years to not reintroduce negative numbers? 
     
         # interpolate between years
         wcde_per_country_df = wcde_per_country_intrp_correct.transpose().reindex(years_interpn_cohorts)
@@ -275,7 +337,7 @@ def interpolate_cohortsize_countries(
     da_cohort_size = xr.DataArray(
         np.asarray([v for k,v in d_cohort_size.items()]), # see whether to include nan countries here -  np.asarray([v for k,v in d_cohort_size.items() if k in df_cohort_size_filter['country'].values])
         coords={
-            'country': ('country', df_cohort_size_filter.index),
+            'country': ('country', countries),
             'time': ('time', years_interpn_cohorts),
             'ages': ('ages', ages_interpn_cohorts),
         },
@@ -298,68 +360,102 @@ def interpolate_cohortsize_countries(
 
 
 def load_population(
-    dir_population=os.path.join(script_dir, 'data/gridded-pop/'), 
-    startyear=1850,
+    dir_population= dir_population, 
+    startyear=1950,
     endyear=2100,
-    ssp=3,
+    ssp=2,
     urbanrural=False,
     chunksize=100
 ):
     """
-    Load gridded population reconstructions (histsoc) + projections (SSPs) from ISIMIP. 
-    Gridded population density at 0.5 degrees, annual expressed as number of people. 
-    ISIMIP2b has histsoc until 2005. ISIMIP3b has histsoc until 2021 (duplicated from ISIMIP3a), 
-    then from Gao et al. 2020 (https://doi.org/10.5065/D60Z721H AND https://doi.org/10.7927/q7z9-9r69),
+    Load gridded population reconstructions (histsoc) + projections (SSPs).
+    
+    Version 1: From ISIMIP3. Gridded population density at 0.5 degrees, annual expressed as number of people (count). 
+    ISIMIP3b has histsoc until 2021 (duplicated from ISIMIP3a), then from Gao et al. 2020 
+    (https://doi.org/10.5065/D60Z721H AND https://doi.org/10.7927/q7z9-9r69),
     scaled to match ISIMIP national population projections under different SSPs. 
+    Note: this has a known hist-to-ssp transition discontinuity spatially
 
-    Notes: Other SSPs are available from Gao et al. but haven't been scaled to match ISIMIP - > also 5 arcmin is available too! 
-    national population totals. 
-    Did they fix the hist-to-ssp transition period? Dont think so. Fix this if important for analyses. 
+    Version 2: from COMPASS, gridded pop count data, annual. Resolution defined in settings (0.1 or 0.5). 
+    From Dominik Paprotny. 1950-2100 in historical + ssp1-5
 
     Input: 
-        filepaths to gridded population (embedded in function for now). 
-        Implemented combinations isimip3-ssp1, isimip2-ssp2, isimip3-ssp3. 
-        urbanrural: False loads only population total, True loads total, urban and rural variables 
+        dir_population: defined in settings, based on version. 
+        urbanrural: False loads only population total, True loads total, urban and rural variables - check if this exists in version 2
     
     Returns:
         da_population: (DataArray)  gridded population density. 
+
     """
 
-    if urbanrural:
-        VARs=['urban-population','rural-population','total-population']
-    else:
-        VARs='total-population'
-    
     # Initialize list to store datasets
     datasets = []
 
-    # Load historical data conditionally based on the start and end year
-    if startyear <= 1900:
-        da_pop_histsoc1 = xr.open_dataset(
-            os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1850_1900.nc')
-        )[VARs]
-        da_pop_histsoc1['time'] = da_pop_histsoc1['time'].dt.year
-        da_pop_histsoc1 = da_pop_histsoc1.sel(time=slice(startyear, min(endyear, 1900)))
-        datasets.append(da_pop_histsoc1)
+    if flags['version'] == 1: 
 
-    if startyear <= 2014 and endyear >= 1901:
-        da_pop_histsoc2 = xr.open_dataset(
-            os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1901_2014.nc')
-        )[VARs]
-        da_pop_histsoc2['time'] = da_pop_histsoc2['time'].dt.year
-        da_pop_histsoc2 = da_pop_histsoc2.sel(time=slice(max(startyear, 1901), min(endyear, 2014)))
-        datasets.append(da_pop_histsoc2)
+        if urbanrural:
+            VARs=['urban-population','rural-population','total-population']
+        else:
+            VARs='total-population'
+        
 
-    # Load SSP data conditionally
-    if endyear >= 2015:
-        print(f'opening isimip3 - ssp{ssp}')
-        da_pop_sspsoc = xr.open_dataset(
-            glob.glob(os.path.join(dir_population, f'ISIMIP3/ISIMIP3b/ssp{ssp}*/population_ssp{ssp}_30arcmin_annual_2015_2100.nc'))[0],
-            decode_times=False
-        )[VARs]
-        da_pop_sspsoc['time'] = np.array([year for year in np.arange(2015, 2101)])
-        da_pop_sspsoc = da_pop_sspsoc.sel(time=slice(max(startyear, 2015), endyear))
-        datasets.append(da_pop_sspsoc)
+        # Load historical data conditionally based on the start and end year
+        if startyear <= 1900:
+            da_pop_histsoc1 = xr.open_dataset(
+                os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1850_1900.nc')
+            )[VARs]
+            da_pop_histsoc1['time'] = da_pop_histsoc1['time'].dt.year
+            da_pop_histsoc1 = da_pop_histsoc1.sel(time=slice(startyear, min(endyear, 1900)))
+            datasets.append(da_pop_histsoc1)
+
+        if startyear <= 2014 and endyear >= 1901:
+            da_pop_histsoc2 = xr.open_dataset(
+                os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1901_2014.nc')
+            )[VARs]
+            da_pop_histsoc2['time'] = da_pop_histsoc2['time'].dt.year
+            da_pop_histsoc2 = da_pop_histsoc2.sel(time=slice(max(startyear, 1901), min(endyear, 2014)))
+            datasets.append(da_pop_histsoc2)
+
+        # Load SSP data conditionally
+        if endyear >= 2015:
+            print(f'opening isimip3 - ssp{ssp}')
+            da_pop_sspsoc = xr.open_dataset(
+                glob.glob(os.path.join(dir_population, f'ISIMIP3/ISIMIP3b/ssp{ssp}*/population_ssp{ssp}_30arcmin_annual_2015_2100.nc'))[0],
+                decode_times=False
+            )[VARs]
+            da_pop_sspsoc['time'] = np.array([year for year in np.arange(2015, 2101)])
+            da_pop_sspsoc = da_pop_sspsoc.sel(time=slice(max(startyear, 2015), endyear))
+            datasets.append(da_pop_sspsoc)
+
+
+    elif flags['version'] == 2: 
+
+        VARs='Population_count'
+
+        if startyear <= 2025:
+            print(f'opening compass - historical')
+            da_pop_histsoc = xr.open_mfdataset(
+                sorted(glob.glob(os.path.join(dir_population, f'historical/Population_count_*_historical.nc'))),
+            )[VARs]
+            da_pop_histsoc['time'] = da_pop_histsoc.time.dt.year
+            da_pop_histsoc = da_pop_histsoc.sel(time=slice(startyear, endyear))
+            datasets.append(da_pop_histsoc)
+
+        # Load SSP data 
+        if endyear >= 2026:
+            print(f'opening compass - ssp{ssp}')
+            da_pop_sspsoc = xr.open_mfdataset(
+                sorted(glob.glob(os.path.join(dir_population, f'ssp{ssp}/Population_count_*_SSP{ssp}.nc'))),
+            )[VARs]
+            da_pop_sspsoc['time'] = da_pop_sspsoc.time.dt.year
+            da_pop_sspsoc = da_pop_sspsoc.sel(time=slice(max(startyear, 2015), endyear))
+            datasets.append(da_pop_sspsoc)
+        
+        pass
+
+
+
+
 
     # Concatenate datasets if there are multiple
     if len(datasets) > 1:
@@ -369,81 +465,6 @@ def load_population(
     
     return da_population
 
-
-
-
-# Does this work ? 
-
-def load_population_cut_to_region(
-    dir_population=os.path.join(script_dir, 'data/gridded-pop/'), 
-    startyear=1850,
-    endyear=2100,
-    ssp=3,
-    urbanrural=False,
-    bbox=None
-):
-
-    # Auxiliary function to slice each dataset to a particular region with coordinates.
-    def cut_to_region_time(da):
-        if da.time.dtype == 'datetime64[ns]':
-            da['time'] = da['time'].dt.year
-        else :
-            da['time'] = (da['time'] + 2015).astype(int) # for ssp data, years since 2015 not parsed correctly
-        return da.sel(lat=slice(bbox[0], bbox[1]), lon=slice(bbox[2], bbox[3]), time=slice(startyear, endyear))
-
-
-    filepaths_hist = [
-        os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1850_1900.nc'),
-        os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1901_2014.nc')
-    ] 
-
-    if urbanrural:
-        VARs=['urban-population','rural-population','total-population']
-    else:
-        VARs='total-population'
-    
-    # Initialize list to store das
-    das = []
-
-    # Import the file, concatenate years and cut for the chosen region
-    if startyear < 2015:
-        ds = xr.open_mfdataset(
-            filepaths_hist,
-            combine='nested',
-            concat_dim='time',
-            decode_coords='all',
-            preprocess=cut_to_region_time
-        )
-        
-        # Extract the  variable from the imported dataset
-        da = ds[VARs]
-
-        das.append(da)
-
-
-    if endyear >2015:
-        filepath_ssp = glob.glob(os.path.join(dir_population, f'ISIMIP3/ISIMIP3b/ssp{ssp}*/population_ssp{ssp}_30arcmin_annual_2015_2100.nc'))[0]
-
-        ds = xr.open_mfdataset(
-        filepath_ssp ,
-        combine='nested',
-        concat_dim='time',
-        decode_times=False,
-        preprocess=cut_to_region_time
-    )
-    
-        # Extract the  variable from the imported dataset
-        da = ds[VARs]
-
-        das.append(da)
-
-    # Concatenate datasets if there are multiple
-    if len(das) > 1:
-        da_population = xr.concat(das, dim='time')
-    else:
-        da_population = das[0]
-    
-    return da_population
 
 
 

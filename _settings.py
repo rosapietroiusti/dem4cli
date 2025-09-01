@@ -3,20 +3,27 @@
 
 # define data directories and paths
 
-# define v1 vs. v2 of dem4cli with the new vs. old data 
+# define v1 vs. v2 of dem4cli with the new vs. old data - change this! 
 
 
 """
-To integrate
-- GMST trajectories from Luke
-- new population data
-- new cohort size data
 
-- how to include old and new versions? all as flags? kind of messy.... or just overwrite and have only v2 ? or make a separate .py file with functions
+To integrate
+- GMST trajectories from Luke - DONE
+- new population data from Dominik
+- new cohort size data from Dominik 
+
+- how to include old and new versions? all as flags? kind of messy.... or just overwrite and have only v2 ? or make a separate .py file with functions 
+- For now work on separate .py file with flags in each fxn - later 
+- Later, figure out how to do this in a more object oriented way !! as a self object that I assign all these things to! And the fxns automatically do what they have to - Ask Ali! 
+
+
 """
 
 import os, sys, re 
 from _utils import * 
+
+
 
 flags = {}
 
@@ -39,17 +46,19 @@ data_dir = os.path.join(script_dir, 'data')
 
 # Data paths for different versions
 
+# Do i want to pull all filepaths out of fxns and put them here? 
+
 if flags['version'] == 1: 
 
-    dir_population = None # paths defined in the functions - maybe change this??
-    dir_cohortsizes = None
+    dir_population = os.path.join(script_dir, 'data/gridded-pop/') 
+    dir_cohortsizes = os.path.join(script_dir, 'data/cohort-sizes/WCDE')
     filepath_countrymask = None
     filepath_lifeexpectancy = None
     filepath_lookuptable = None # fxn in _match_countries.py
 
 elif flags['version'] == 2:
 
-    dir_population = '/data/brussel/vo/000/bvo00012/data/dataset/COMPASS/v2/'+float_to_str(flags['pop_resolution']) # make a symlink in dem4cli? 
+    dir_population = '/data/brussel/vo/000/bvo00012/data/dataset/COMPASS/v2/'+float_to_str(flags['pop_resolution'])+'deg' # make a symlink in dem4cli? 
     dir_cohortsizes = os.path.join(data_dir, 'cohort-sizes/WCDE_v3.2.beta')
     filepath_countrymask = '/data/brussel/vo/000/bvo00012/data/dataset/COMPASS/v2/'+'Country_map.nc' # copy or symlink in dem4cli? 
     filepath_lifeexpectancy = os.path.join(data_dir, 'UNWPP2024/WPP2024_MORT_F05_1_LIFE_EXPECTANCY_BY_AGE_BOTH_SEXES.xlsx')
@@ -60,11 +69,11 @@ elif flags['version'] == 2:
 # settings for GMT mapping 
 dir_temperature_trajectories = os.path.join(data_dir, 'temperature-trajectories') # for stylized trajectory creation
 
-
+# for stylized and indicative trajectories
 GMT_inc = 0.1
 scen_thresholds = {
     '3.0': [2.9,3.0],
-    'NDC': [2.35,2.4], # this is not 2.7 it's 2.4 ! Update value? 
+    'NDC': [2.35,2.4], # this is not 2.7 it's 2.4 ? Update value? 
     '2.0': [1.95,2.0],
     '1.5': [1.45, 1.5],
 }
