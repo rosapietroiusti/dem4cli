@@ -2,18 +2,14 @@
 Demographics4Climate : Population and demographics for climate science analysis
 ----------------------------------------------
 
-2024 Update
+Update 2025 with new data 
 
-Calculate gridscale demographics based on 
-- gridded population from ISIMIP2/ISIMIP3
-- cohort sizes from WCDE
-- metadata on countries from ISIMIP2/3, WCDE, isipedia, world bank... 
+> udnerstand how best to deal with having v1 and v2... 
 
-To do
-Code slightly to clean up
-test for isimip2 and 3 
-make final wrapper function
-remove geojson if not necessary and edit match countrynames to use mask instead 
+options
+- have only one pop_demographics file but make flags, outside of functions or inside functions saying which functions get loaded.... 
+
+- make wrapper function for S2S 
 
 """ 
 

@@ -172,7 +172,8 @@ def load_GMT(
                                                                                                     note that OS, noOS and NDC might be outdated? OS and noOS come from Wim's original code and NDC hits 2.4
 
     Notes
-        - df_GMT_OS, df_GMT_noOS, ds_GMT_STS now inconsistent with new method for post 2100 extension? doing 10yrmean
+        - df_GMT_OS, df_GMT_noOS, ds_GMT_STS now inconsistent with new method for post 2100 extension( 10 yrmean) - delete them? keep only 15, 20, strj? 
+        - and document better how they are derived
         - original df_GMT_SR15 used only to get historical 1960-1999
         - can still clean this up a bit
     """

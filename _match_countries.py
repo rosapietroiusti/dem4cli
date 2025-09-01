@@ -1,3 +1,8 @@
+"""
+dem4cli v1.0 match country names
+
+"""
+
 
 
 import numpy as np
@@ -8,6 +13,10 @@ from scipy import interpolate
 import glob, os, re, sys
 import warnings
 import openpyxl 
+
+from settings import * 
+from utils import * 
+from population_demographics import * 
 
 
 def match_country_names_all_mask_frac(
@@ -186,12 +195,12 @@ def match_country_names_all_mask_frac(
 
     # WCDE countries unmatched
     df_wcde_unmatched = final_combined_df[ final_combined_df['merge_country']=='right_only']
-    print("Unmatched WCDE countries after all merges:")
+    print("\nUnmatched WCDE countries after all merges:")
     print(df_wcde_unmatched[['country_wcde']])  
     
     # Identify and print unmatched mask countries
     unmatched_countries = final_combined_df[(final_combined_df['merge_substring_msk'] == 'left_only') | (final_combined_df['merge_frac2'] == 'right_only') ]
-    print("Unmatched ISIMIP mask countries (geojson + frac mask) after all merges:")
+    print("\nUnmatched ISIMIP mask countries (geojson + frac mask) after all merges:")
     print(unmatched_countries[['country_mask', 'iso3_frac']])
 
     
@@ -199,19 +208,19 @@ def match_country_names_all_mask_frac(
     df_countries_matched = final_combined_df.drop(columns=['merge_country', 'merge_country_wb', 
                                                            'merge_common_word', 'merge_substring', 
                                                            'merge_country_msk_n', 'merge_substring_msk',
-                                                           'merge_frac','merge_frac2', # cols to drop
-                                                          ])[['country', 
-                                                              'country_wb', 
-                                                              'country_wcde', 
-                                                              'country_mask',
-                                                              'country_iso3', 
-                                                              'iso3_mask',
-                                                              'iso3_frac', 
-                                                              'country_code', 
-                                                              'region',
-                                                              'income_group']] # cols to keep 
+                                                           'merge_frac','merge_frac2',              # cols to drop
+                                                          ])[['country', # isimip country data
+                                                              'country_wb', # world bank
+                                                              'country_wcde',  # wcde
+                                                              'country_mask',  # geojson mask
+                                                              'country_iso3', # world bank
+                                                              'iso3_mask', # geojson mask 
+                                                              'iso3_frac', # fractional mask
+                                                              'country_code', # isimip country data
+                                                              'region', # world bank
+                                                              'income_group']] # world bank               #  cols to keep 
 
-    
+    df_countries_matched = df_countries_matched.rename(columns={"country": "country"})
+
     return df_countries_matched.sort_values(['country','country_wcde','country_mask']).reset_index(drop=True)
-
 
