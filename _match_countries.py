@@ -14,8 +14,8 @@ import glob, os, re, sys
 import warnings
 import openpyxl 
 
-from settings import * 
-from utils import * 
+from _settings import * 
+from _utils import * 
 from population_demographics import * 
 
 

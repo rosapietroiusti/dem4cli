@@ -30,6 +30,7 @@ from _settings import *
 # ---------------------------------
 
 # is this getting used anywhere? 
+# only v1
 
 def load_country_metadata(
     filepath_isimip_countries = os.path.join(script_dir, 'data/country-masks/isipedia-countries/countryData.json'),
@@ -82,7 +83,9 @@ def load_country_metadata(
 
 
 
-# COULD DELETE THIS ! 
+# COULD DELETE THIS ! Not getting used 
+#v1
+
 def load_country_stats(
     filepath_isimip_stats = os.path.join(script_dir, 'data/country-masks/isipedia-countries/countryprofiledata.json')
                       ):
@@ -365,7 +368,8 @@ def load_population(
     endyear=2100,
     ssp=2,
     urbanrural=False,
-    chunksize=100
+    chunksize=100,
+    bbox=None, 
 ):
     """
     Load gridded population reconstructions (histsoc) + projections (SSPs).
@@ -380,13 +384,41 @@ def load_population(
     From Dominik Paprotny. 1950-2100 in historical + ssp1-5
 
     Input: 
-        dir_population: defined in settings, based on version. 
-        urbanrural: False loads only population total, True loads total, urban and rural variables - check if this exists in version 2
+        dir_population:         defined in settings, based on version. 
+        urbanrural:             False loads only population total, True loads total, urban and rural variables - only available in v1
+        startyear, endyear (int)
+        ssp (int):              1,2 or 3
+        chunksize (int):        for dask
+        bbox (optional):        tuple or array. (latmin, latmax, lonmin, lonmax) 
     
     Returns:
         da_population: (DataArray)  gridded population density. 
 
     """
+
+    # # Auxiliary function to slice each dataset to a particular region and time 
+    def cut_to_region_time(da):
+        
+        # time slice
+        if da.time.dtype == 'datetime64[ns]':
+            da['time'] = da['time'].dt.year
+        else:
+            da['time'] = da['time'].astype(int) + startyear_ssp
+
+        if bbox is None:
+            return da.sel(time=slice(startyear, endyear))
+
+        # region slicing 
+        latmin, latmax, lonmin, lonmax = bbox 
+        if da.lat.values[0] < da.lat.values[-1]: # check if lat is increasing or decreasing
+            return da.sel(
+                lat=slice(latmin, latmax), lon=slice(lonmin, lonmax), time=slice(startyear, endyear)
+                )
+        else:
+            return da.sel(
+                lat=slice(latmax, latmin), lon=slice(lonmin, lonmax), time=slice(startyear, endyear)
+                )
+
 
     # Initialize list to store datasets
     datasets = []
@@ -398,30 +430,43 @@ def load_population(
         else:
             VARs='total-population'
         
+        # for correct opening of times
+        startyear_ssp = 2015
 
         # Load historical data conditionally based on the start and end year
         if startyear <= 1900:
-            da_pop_histsoc1 = xr.open_dataset(
-                os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1850_1900.nc')
+            da_pop_histsoc1 = xr.open_mfdataset(
+                os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1850_1900.nc'),
+                combine='nested',
+                concat_dim='time',
+                decode_coords='all',
+                preprocess=cut_to_region_time
             )[VARs]
-            da_pop_histsoc1['time'] = da_pop_histsoc1['time'].dt.year
-            da_pop_histsoc1 = da_pop_histsoc1.sel(time=slice(startyear, min(endyear, 1900)))
+            #da_pop_histsoc1['time'] = da_pop_histsoc1['time'].dt.year
+            #da_pop_histsoc1 = da_pop_histsoc1.sel(time=slice(startyear, min(endyear, 1900)))
             datasets.append(da_pop_histsoc1)
 
         if startyear <= 2014 and endyear >= 1901:
-            da_pop_histsoc2 = xr.open_dataset(
-                os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1901_2014.nc')
+            da_pop_histsoc2 = xr.open_mfdataset(
+                os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1901_2014.nc'),
+                combine='nested',
+                concat_dim='time',
+                decode_coords='all',
+                preprocess=cut_to_region_time
             )[VARs]
-            da_pop_histsoc2['time'] = da_pop_histsoc2['time'].dt.year
-            da_pop_histsoc2 = da_pop_histsoc2.sel(time=slice(max(startyear, 1901), min(endyear, 2014)))
+            #da_pop_histsoc2['time'] = da_pop_histsoc2['time'].dt.year
+            #da_pop_histsoc2 = da_pop_histsoc2.sel(time=slice(max(startyear, 1901), min(endyear, 2014)))
             datasets.append(da_pop_histsoc2)
 
         # Load SSP data conditionally
         if endyear >= 2015:
             print(f'opening isimip3 - ssp{ssp}')
-            da_pop_sspsoc = xr.open_dataset(
+            da_pop_sspsoc = xr.open_mfdataset(
                 glob.glob(os.path.join(dir_population, f'ISIMIP3/ISIMIP3b/ssp{ssp}*/population_ssp{ssp}_30arcmin_annual_2015_2100.nc'))[0],
-                decode_times=False
+                combine='nested',
+                concat_dim='time',
+                decode_times=False,
+                preprocess=cut_to_region_time
             )[VARs]
             da_pop_sspsoc['time'] = np.array([year for year in np.arange(2015, 2101)])
             da_pop_sspsoc = da_pop_sspsoc.sel(time=slice(max(startyear, 2015), endyear))
@@ -431,14 +476,19 @@ def load_population(
     elif flags['version'] == 2: 
 
         VARs='Population_count'
+        startyear_ssp = 2025 
 
         if startyear <= 2025:
             print(f'opening compass - historical')
             da_pop_histsoc = xr.open_mfdataset(
                 sorted(glob.glob(os.path.join(dir_population, f'historical/Population_count_*_historical.nc'))),
+                combine='nested',
+                concat_dim='time',
+                decode_coords='all',
+                preprocess=cut_to_region_time,
             )[VARs]
-            da_pop_histsoc['time'] = da_pop_histsoc.time.dt.year
-            da_pop_histsoc = da_pop_histsoc.sel(time=slice(startyear, endyear))
+            #da_pop_histsoc['time'] = da_pop_histsoc.time.dt.year
+            #da_pop_histsoc = da_pop_histsoc.sel(time=slice(startyear, endyear))
             datasets.append(da_pop_histsoc)
 
         # Load SSP data 
@@ -446,9 +496,13 @@ def load_population(
             print(f'opening compass - ssp{ssp}')
             da_pop_sspsoc = xr.open_mfdataset(
                 sorted(glob.glob(os.path.join(dir_population, f'ssp{ssp}/Population_count_*_SSP{ssp}.nc'))),
+                combine='nested',
+                concat_dim='time',
+                decode_coords='all',
+                preprocess=cut_to_region_time,
             )[VARs]
-            da_pop_sspsoc['time'] = da_pop_sspsoc.time.dt.year
-            da_pop_sspsoc = da_pop_sspsoc.sel(time=slice(max(startyear, 2015), endyear))
+            #da_pop_sspsoc['time'] = da_pop_sspsoc.time.dt.year
+            #da_pop_sspsoc = da_pop_sspsoc.sel(time=slice(max(startyear, 2015), endyear))
             datasets.append(da_pop_sspsoc)
         
         pass
@@ -463,7 +517,12 @@ def load_population(
     else:
         da_population = datasets[0]
     
-    return da_population
+
+    # cut to bounding box if given - TODO: might be faster/less data intensive way without loading into memory! in a preprocess fxn 
+    if not bbox:
+        return da_population
+    else:
+        return da_population.sel(lat=slice(bbox[0], bbox[1]), lon=slice(bbox[2], bbox[3]))
 
 
 
@@ -474,6 +533,7 @@ def load_population(
 
 
 
+# TODO: make equivalent of this for v2 !
 
 def load_countrymasks_fillcoasts(
     filepath=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_fractional.nc'),
@@ -624,7 +684,7 @@ def get_life_expectancies(df_unwpp,
 
 
 
-# TODO ADD A WRAPPER FUNCTION THAT MAKES THE ORIGINAL DICTIONARY d_countries LUKE WAS OUTPUTTING, FOR S2S AND DEM4CLI v2.0 
+# TODO ADD A WRAPPER FUNCTION THAT MAKES THE ORIGINAL DICTIONARY d_countries LUKE WAS OUTPUTTING, FOR S2S 
 
 
 
@@ -770,16 +830,16 @@ def population_demographics_gridscale_global(
 
 
 
-def population_demographics_gridscale_selcountries(
-    startyear=2000,
-    endyear=2005,
-    ssp=2,
-    urbanrural=False,
-    countrylist=None
-):
+# def population_demographics_gridscale_selcountries(
+#     startyear=2000,
+#     endyear=2005,
+#     ssp=2,
+#     urbanrural=False,
+#     countrylist=None
+# ):
 
-    pass # TO DEVELOP for a single country 
+#     pass # TO DEVELOP for a single country / selected countries 
 
-    return da_pop_demographics
+#     return da_pop_demographics
 
 
