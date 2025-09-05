@@ -225,7 +225,8 @@ def load_cohort_sizes(
         if not by_sex:
             da = da.sum(dim='sex') # in the alternative it doesnt really get used anyway... 
 
-        df_cohort_sizes = da 
+        df_cohort_sizes = da.where(da.country != 'World', drop=True)
+ 
         # note its a da not a df !!! TODO: change the version 1 so it also gives a da? or rename this to cohortsizes_raw or something! 
 
     return df_cohort_sizes, ages, years
@@ -395,10 +396,8 @@ def load_population(
         da_population: (DataArray)  gridded population density. 
 
     """
-
-    # # Auxiliary function to slice each dataset to a particular region and time 
+    # Auxiliary function to slice each dataset to a particular region and time 
     def cut_to_region_time(da):
-        
         # time slice
         if da.time.dtype == 'datetime64[ns]':
             da['time'] = da['time'].dt.year
@@ -407,7 +406,6 @@ def load_population(
 
         if bbox is None:
             return da.sel(time=slice(startyear, endyear))
-
         # region slicing 
         latmin, latmax, lonmin, lonmax = bbox 
         if da.lat.values[0] < da.lat.values[-1]: # check if lat is increasing or decreasing
@@ -530,55 +528,49 @@ def load_population(
 
 
 
-
-
-
-# TODO: make equivalent of this for v2 !
-
 def load_countrymasks_fillcoasts(
-    filepath=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_fractional.nc'),
-    fillcoast=True,
-    fix_smallislands=True):
+    filepath_countrymask=filepath_countrymask,
+    fillcoast=False,
+    fix_smallislands=False, # fix this for flexible resolution! 
+    bbox=None,
+    ):
     """
-    Load ISIMIP3 fractional countrymasks and fill coastal pixels so sum of fraction = 1 so coastal populations are not lost. 
+    Load countrymasks and fill coastal pixels so sum of fraction = 1 so coastal populations are not lost. 
 
     """
 
     # Open data 
-    
-    ds=xr.open_dataset(filepath)
+    ds=xr.open_dataset(filepath_countrymask, chunks={"lat": 100, "lon": 100})
     da_countrymasks = ds.to_array()
-
+    # clean
     strings = da_countrymasks['variable'].values
     cleaned_strings = [s[2:] if s.startswith('m_') else s for s in strings]
     da_countrymasks['variable'] = cleaned_strings
     # last variable is 'world', lose it 
     da_countrymasks = da_countrymasks.isel(variable=slice(0,225))
-    # sum over all countries 
-    countrymask_sum = da_countrymasks.isel(variable=slice(0,225)).sum(dim='variable')
 
     if fillcoast:
+        # sum over all countries 
+        countrymask_sum = da_countrymasks.sum(dim='variable')
         # Part 2. Correct for coastal pixels 
-        
         # where sum of fraction is less than 1, weighted multiplication for sum to equal one
-        da_countrymasks_correct = xr.where(countrymask_sum < 1, da_countrymasks*(1/da_countrymasks.sum(dim='variable')), da_countrymasks)
+        da_countrymasks_correct = xr.where(countrymask_sum < 1, da_countrymasks * (1 / countrymask_sum ), da_countrymasks)
         # small area sum = 2, correct for it 
         da_countrymasks_corr = xr.where(da_countrymasks_correct.sum(dim='variable') > 1, da_countrymasks_correct/da_countrymasks_correct.sum(dim='variable'), da_countrymasks_correct)
+        da_countrymasks = da_countrymasks_corr
 
-        da_countrymasks = da_countrymasks_correct
-
-    
     if fix_smallislands:  
+        pass
+        #TODO change the lat indexing to be with coords!! 
         # Fix issue in Singapore pixel, assign fraction from IOSID to SGP 
         da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='SGP')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')].values
         da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')] = 0
-        
         # Fix it also in Mauritius 
         da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='MUS')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')].values
         da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')] = 0
-        
+    
 
-    return da_countrymasks
+    return da_countrymasks.rename({'variable':'country'})
 
 
 
@@ -591,7 +583,9 @@ def load_countrymasks_fillcoasts(
 
 
 
-def load_unwpp():
+def load_unwpp(
+        filepath_lifeexpectancy = filepath_lifeexpectancy
+):
     """
     Load UNWPP2024 data on e(x) = Life Expectancy at Exact Age x (ex) - Both Sexes.
 
@@ -603,10 +597,9 @@ def load_unwpp():
     https://population.un.org/wpp/downloads?folder=Standard%20Projections&group=Mortality
     
     """
+
     
-    filepath_unwpp = os.path.join(script_dir, 'data/life-expectancy/UN_WPP2024/WPP2024_MORT_F05_1_LIFE_EXPECTANCY_BY_AGE_BOTH_SEXES.xlsx')
-    
-    df_unwpp_raw = pd.read_excel(filepath_unwpp, 
+    df_unwpp_raw = pd.read_excel(filepath_lifeexpectancy, 
              sheet_name=0,
              skiprows=16) # make this more flex 
     

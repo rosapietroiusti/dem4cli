@@ -46,30 +46,29 @@ data_dir = os.path.join(script_dir, 'data')
 
 # Data paths for different versions
 
-# Do i want to pull all filepaths out of fxns and put them here? 
+# pulling filepaths out of functions (mostly) to make it easier to switch between versions
 
 if flags['version'] == 1: 
 
     dir_population = os.path.join(script_dir, 'data/gridded-pop/') 
     dir_cohortsizes = os.path.join(script_dir, 'data/cohort-sizes/WCDE')
-    filepath_countrymask = None
-    filepath_lifeexpectancy = None
-    filepath_lookuptable = None # fxn in _match_countries.py
+    filepath_countrymask = os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_fractional_'+float_to_str(flags['pop_resolution'])+'deg.nc')
+    filepath_lifeexpectancy = os.path.join(data_dir, 'life-expectancy/UN_WPP2024/WPP2024_MORT_F05_1_LIFE_EXPECTANCY_BY_AGE_BOTH_SEXES.xlsx')
+    filepath_lookuptable = os.path.join(data_dir, 'country-masks/lookup_table_dem4cli_v1.xlsx' )
+                                         
 
 elif flags['version'] == 2:
 
-    dir_population = '/data/brussel/vo/000/bvo00012/data/dataset/COMPASS/v2/'+float_to_str(flags['pop_resolution'])+'deg' # make a symlink in dem4cli? 
+    dir_population = '/data/brussel/vo/000/bvo00012/data/dataset/COMPASS/v2/population_count/'+float_to_str(flags['pop_resolution'])+'deg' # make a symlink in dem4cli? 
     dir_cohortsizes = os.path.join(data_dir, 'cohort-sizes/WCDE_v3.2.beta')
-    filepath_countrymask = '/data/brussel/vo/000/bvo00012/data/dataset/COMPASS/v2/'+'Country_map.nc' # copy or symlink in dem4cli? 
-    filepath_lifeexpectancy = os.path.join(data_dir, 'UNWPP2024/WPP2024_MORT_F05_1_LIFE_EXPECTANCY_BY_AGE_BOTH_SEXES.xlsx')
-    filepath_lookuptable = '/data/brussel/vo/000/bvo00012/data/dataset/COMPASS/v2/'+'cross_reference_SSP3_2_to_ISO.xlsx'
+    filepath_countrymask = os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_fractional_'+float_to_str(flags['pop_resolution'])+'deg.nc')
+    filepath_lifeexpectancy = os.path.join(data_dir, 'life-expectancy/UN_WPP2024/WPP2024_MORT_F05_1_LIFE_EXPECTANCY_BY_AGE_BOTH_SEXES.xlsx')
+    filepath_lookuptable_original = '/data/brussel/vo/000/bvo00012/data/dataset/COMPASS/v2/'+'cross_reference_SSP3_2_to_ISO.xlsx'
+    filepath_lookuptable = os.path.join(data_dir, 'country-masks/lookup_table_dem4cli_v2.csv')
 
 
-
-# settings for GMT mapping 
-dir_temperature_trajectories = os.path.join(data_dir, 'temperature-trajectories') # for stylized trajectory creation
-
-# for stylized and indicative trajectories
+# settings for GMT mapping / stylized trajectory creation
+dir_temperature_trajectories = os.path.join(data_dir, 'temperature-trajectories') 
 GMT_inc = 0.1
 scen_thresholds = {
     '3.0': [2.9,3.0],
