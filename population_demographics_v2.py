@@ -36,14 +36,15 @@ from _settings import *
 
 def load_country_metadata(
     filepath_isimip_countries = os.path.join(script_dir, 'data/country-masks/isipedia-countries/countryData.json'),
-    filepath_world_bank = os.path.join(script_dir, 'data/income-groups/world_bank/CLASS.xlsx'),
+    filepath_world_bank = os.path.join(script_dir, 'data/income-groups/world_bank/CLASS.xlsx'), # what year is this from? 
     keep_names='isimip',
     keep_stats=False,
 
 ):
     """
-    load country list from isipedia-coutries (country masks metadata files from Perette 2023, https://github.com/ISI-MIP/isipedia-countries). For 195 official/observer UN countries. 
+    load country list from isipedia-coutries (country masks metadata files from Perette 2023, https://github.com/ISI-MIP/isipedia-countries)
     and metadata from worldbank.
+    Keeps only 195 official/observer UN countries. 
 
     Input
         keep_names (str) what country names to keep, can be 'isimip', 'world_bank', 'both'  
@@ -79,7 +80,7 @@ def load_country_metadata(
     if keep_stats == True:
         keep_cols=keep_cols+list(df_isimip_metadata.columns[3:])
 
-    df_metadata = df_merge[keep_cols].rename(columns=d_rename) #.head(196) # 'Economy', 
+    df_metadata = df_merge[keep_cols].rename(columns=d_rename) 
         
     return df_metadata
 
@@ -758,7 +759,7 @@ def preprocess_all_country_data(
 
     # pack country information
     d_countries = {
-        'info_pop': None, 
+        'info_pop': None, # df_countries 
         'borders': da_countrymasks, # note this is now a dataarray not geodf borders
         'population_map': da_population,
         'birth_years': None,
@@ -768,9 +769,13 @@ def preprocess_all_country_data(
     }
 
 
-    # TODO: harmonize what countries are included in d_countries? based on overlap between all sources 
-    # otherwise you have all the countries in all the objects
+    # TODO: harmonize what countries are included in d_countries? before making the dict, 
+    # based on overlap between all sources 
+    # otherwise you have all the countries in all the objects, except dropped in mask is bbox is used 
+
     # TODO: see if Amaury needs other objects I didn't include in d_countries 
+    # I think he will need df_countries / info_pop to determine what countries to use in analysis
+    # not sure what 'mask' was for
 
     return d_countries
 
