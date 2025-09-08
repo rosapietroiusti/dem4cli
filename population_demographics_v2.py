@@ -12,6 +12,7 @@ options
 - make wrapper function for S2S 
 
 """ 
+#%%
 
 import numpy as np
 import xarray as xr
@@ -25,6 +26,7 @@ import openpyxl
 from _utils import * 
 from _settings import *
 
+#%%
 # ---------------------------------
 # 1. Metadata 
 # ---------------------------------
@@ -133,6 +135,8 @@ def load_cohort_sizes(
                                 (version 1, in version 2 its a self-explanatory data array)
         ages (arr) : central year of interval (2,7...102)
         years (arr) : years we have data for (1950, 1955...2100)
+
+    Note: this also exists from UNWPP2024! Could be more consistent with life expectancy data 
     """
 
     def convert_age_range(age):
@@ -369,7 +373,6 @@ def load_population(
     endyear=2100,
     ssp=2,
     urbanrural=False,
-    chunksize=100,
     bbox=None, 
 ):
     """
@@ -389,7 +392,6 @@ def load_population(
         urbanrural:             False loads only population total, True loads total, urban and rural variables - only available in v1
         startyear, endyear (int)
         ssp (int):              1,2 or 3
-        chunksize (int):        for dask
         bbox (optional):        tuple or array. (latmin, latmax, lonmin, lonmax) 
     
     Returns:
@@ -502,12 +504,6 @@ def load_population(
             #da_pop_sspsoc['time'] = da_pop_sspsoc.time.dt.year
             #da_pop_sspsoc = da_pop_sspsoc.sel(time=slice(max(startyear, 2015), endyear))
             datasets.append(da_pop_sspsoc)
-        
-        pass
-
-
-
-
 
     # Concatenate datasets if there are multiple
     if len(datasets) > 1:
@@ -516,11 +512,8 @@ def load_population(
         da_population = datasets[0]
     
 
-    # cut to bounding box if given - TODO: might be faster/less data intensive way without loading into memory! in a preprocess fxn 
-    if not bbox:
-        return da_population
-    else:
-        return da_population.sel(lat=slice(bbox[0], bbox[1]), lon=slice(bbox[2], bbox[3]))
+    return da_population.rename('total-population')
+    
 
 
 
@@ -530,47 +523,72 @@ def load_population(
 
 def load_countrymasks_fillcoasts(
     filepath_countrymask=filepath_countrymask,
-    fillcoast=False,
-    fix_smallislands=False, # fix this for flexible resolution! 
+    preprocess=False, # True if you want to preprocess
+    fillcoast=False, # fill coastal pixels to not lose coastal pops (done in preprocessed files)
+    fix_smallislands=False, # done in preprocessed input files for 0.5, not for 0.1 - TODO: check if necessary at 0.1 or not ! 
     bbox=None,
     ):
     """
-    Load countrymasks and fill coastal pixels so sum of fraction = 1 so coastal populations are not lost. 
+    Load countrymasks - option to fill coastal pixels so sum of fraction = 1 so coastal populations are not lost. 
 
     """
 
-    # Open data 
-    ds=xr.open_dataset(filepath_countrymask, chunks={"lat": 100, "lon": 100})
-    da_countrymasks = ds.to_array()
-    # clean
-    strings = da_countrymasks['variable'].values
-    cleaned_strings = [s[2:] if s.startswith('m_') else s for s in strings]
-    da_countrymasks['variable'] = cleaned_strings
-    # last variable is 'world', lose it 
-    da_countrymasks = da_countrymasks.isel(variable=slice(0,225))
+    def cut_to_region(da, bbox):
+        # cut to a predefined region
+        latmin, latmax, lonmin, lonmax = bbox
+        if da.lat.values[0] < da.lat.values[-1]:
+            da = da.sel(lat=slice(latmin, latmax), lon=slice(lonmin, lonmax))
+        else:
+            da = da.sel(lat=slice(latmax, latmin), lon=slice(lonmin, lonmax))
+        # compute which countries have all-NaN/0 inside the bbox and drop them 
+        mask = ~((da.isnull() | (da == 0)).all(dim=("lat","lon")))
+        return da.sel(country=mask)
 
-    if fillcoast:
-        # sum over all countries 
-        countrymask_sum = da_countrymasks.sum(dim='variable')
-        # Part 2. Correct for coastal pixels 
-        # where sum of fraction is less than 1, weighted multiplication for sum to equal one
-        da_countrymasks_correct = xr.where(countrymask_sum < 1, da_countrymasks * (1 / countrymask_sum ), da_countrymasks)
-        # small area sum = 2, correct for it 
-        da_countrymasks_corr = xr.where(da_countrymasks_correct.sum(dim='variable') > 1, da_countrymasks_correct/da_countrymasks_correct.sum(dim='variable'), da_countrymasks_correct)
-        da_countrymasks = da_countrymasks_corr
+    if not preprocess:
+        # Open data - already preprocessed
+        da_countrymasks = xr.open_dataarray(filepath_countrymask, chunks='auto')
+        if "variable" in da_countrymasks.dims:
+            da_countrymasks = da_countrymasks.isel(variable=0)
 
-    if fix_smallislands:  
-        pass
-        #TODO change the lat indexing to be with coords!! 
-        # Fix issue in Singapore pixel, assign fraction from IOSID to SGP 
-        da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='SGP')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')].values
-        da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')] = 0
-        # Fix it also in Mauritius 
-        da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='MUS')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')].values
-        da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')] = 0
-    
 
-    return da_countrymasks.rename({'variable':'country'})
+    if preprocess:
+        # Open data 
+        ds=xr.open_dataset(filepath_countrymask, chunks='auto')
+        da_countrymasks = ds.to_array()
+        # clean
+        strings = da_countrymasks['variable'].values
+        cleaned_strings = [s[2:] if s.startswith('m_') else s for s in strings]
+        da_countrymasks['variable'] = cleaned_strings
+        # last variable is 'world', lose it 
+        da_countrymasks = da_countrymasks.isel(variable=slice(0,225))
+
+        if fillcoast:
+            # sum over all countries 
+            countrymask_sum = da_countrymasks.sum(dim='variable')
+            # Part 2. Correct for coastal pixels 
+            # where sum of fraction is less than 1, weighted multiplication for sum to equal one
+            da_countrymasks_correct = xr.where(countrymask_sum < 1, da_countrymasks * (1 / countrymask_sum ), da_countrymasks)
+            # small area sum = 2, correct for it 
+            da_countrymasks_corr = xr.where(da_countrymasks_correct.sum(dim='variable') > 1, da_countrymasks_correct/da_countrymasks_correct.sum(dim='variable'), da_countrymasks_correct)
+            da_countrymasks = da_countrymasks_corr
+
+        if fix_smallislands:  
+            # TODO change the lat indexing to be with coords!! doesnt work for 0.1 - hard coded for 0.5 deg 
+            # Fix issue in Singapore pixel, assign fraction from IOSID to SGP 
+            da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='SGP')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')].values
+            da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')] = 0
+            # Fix it also in Mauritius 
+            da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='MUS')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')].values
+            da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')] = 0
+        
+        da_countrymasks = da_countrymasks.rename({'variable':'country'})
+
+    if not bbox:
+        return da_countrymasks
+    else: 
+        return cut_to_region(da_countrymasks, bbox)
+
+
 
 
 
@@ -583,13 +601,14 @@ def load_countrymasks_fillcoasts(
 
 
 
-def load_unwpp(
+def load_unwpp_lifeexpectancy(
         filepath_lifeexpectancy = filepath_lifeexpectancy
 ):
     """
     Load UNWPP2024 data on e(x) = Life Expectancy at Exact Age x (ex) - Both Sexes.
 
-    The average number of remaining years of life expected by a hypothetical cohort of individuals alive at age x who would be subject during the remaining of their lives to the mortality rates of a given year. It is expressed as years.
+    The average number of remaining years of life expected by a hypothetical cohort of individuals alive at age x who would be subject during the 
+    remaining of their lives to the mortality rates of a given year. It is expressed as years. Has data from birth year 1950 to 2023. 
 
     Keep only Country name and years left to live at age 5 e(5). 
 
@@ -628,7 +647,9 @@ def load_unwpp(
 
 
 def get_life_expectancies(df_unwpp,
-                         extend=True):
+                         extend=True,
+                         start_birthyear=1950,
+                         end_birthyear=2025):
     
     """
     - Takes UNWPP life expectancy data expressed as years left to live at age of 5, 
@@ -639,19 +660,19 @@ def get_life_expectancies(df_unwpp,
     life expectancy: Gaps and lags")
     - Thus get life expectancy in each year for each country at birth 
     expressed in "cohort" way, neglecting infant mortality.
-    - Data ends for 2018 cohort (5 y.o. in 2023), extend to 2020 cohort by filling with constant value 
+    - Data ends for 2018 cohort (5 y.o. in 2023), extends by filling with constant value 
 
     """
     
     df_life_expectancy_5 = df_unwpp.copy()
-    df_life_expectancy_5.index = df_life_expectancy_5.index-5 # year of birth 
+    df_life_expectancy_5.index = df_life_expectancy_5.index-5 # year of birth: 2023 (age 5) becomes 2018 (age 0)
     df_life_expectancy_5 = df_life_expectancy_5 + 5 + 6 
 
-    if extend:
-        # extend up to 2020 
+    if df_life_expectancy_5.index[-1] < end_birthyear :
+        # extend for last years
         df_life_expectancy_5_extend = df_life_expectancy_5.reindex(
-        np.arange(1945,2020+1)).astype( # make this more flexible !!
-        'float').interpolate() # fills last two years constant at 2018 level 
+                    np.arange(start_birthyear,end_birthyear+1)).astype( 
+                    'float').interpolate() # extrapolation: fills last years constant 
     
         return df_life_expectancy_5_extend
     else:
@@ -673,11 +694,88 @@ def get_life_expectancies(df_unwpp,
 # -----------------------------------------------------
 
 
+def preprocess_all_country_data(
+
+    dir_cohortsizes = dir_cohortsizes,  # cohort size data
+    ssp=2, 
+    by_sex=False,                       # NOTE by_sex not implemented
+                                            
+    filepath_lifeexpectancy = filepath_lifeexpectancy, # life expectancy data
+    start_birthyear=1950,
+    end_birthyear=2025, 
+
+    dir_population= dir_population,     # gridded pop data 
+    startyear=1950,
+    endyear=2100,
+    urbanrural=False,                   # NOTE urbanrural not implemented for v2
+    bbox = None,
+
+    filepath_countrymask = filepath_countrymask,    # country masks 
+    preprocess=False,                               # NOTE preprocessing is already done in standard input files 
+    fillcoast=False, 
+    fix_smallislands=False,
+
+    ):
+
+    df_cohort_sizes, ages, years = load_cohort_sizes(dir_cohortsizes, ssp=ssp, by_sex=by_sex)
+    # loads raw cohort size data from historical + ssp and cleans to keep only relevant information
+
+    da_cohort_size = interpolate_cohortsize_countries(
+                        df_cohort_sizes,
+                        ages,
+                        years,
+                    )
+    # interpolates cohort sizes from 5 year to single year and corrects to preserve mean
+
+
+    df_unwpp = load_unwpp_lifeexpectancy(filepath_lifeexpectancy = filepath_lifeexpectancy) 
+    # load life expectancy data and clean 
+
+    df_life_expectancy_5 = get_life_expectancies(df_unwpp,
+                                            start_birthyear=start_birthyear,
+                                            end_birthyear=end_birthyear) 
+    # go from 'period' to 'cohort' life expectancy
+
+    da_population = load_population(
+    dir_population= dir_population, 
+    startyear=startyear,
+    endyear=endyear,
+    ssp=ssp,
+    urbanrural=urbanrural,
+    bbox = bbox 
+    )
+    # load gridded population data, optional cropping
+
+    da_countrymasks = load_countrymasks_fillcoasts(
+                            filepath_countrymask,
+                            preprocess=preprocess, 
+                            fillcoast=fillcoast, # fill coastal pixels to not lose coastal pops 
+                            fix_smallislands=fix_smallislands, # done in preprocessed input files for 0.5, not for 0.1 
+                            bbox=bbox,
+                            )
+    # open countrymasks, optional preprocessing (already done in default input files)
+
+
+    # pack country information
+    d_countries = {
+        'info_pop': None, 
+        'borders': da_countrymasks, # note this is now a dataarray not geodf borders
+        'population_map': da_population,
+        'birth_years': None,
+        'life_expectancy_5': df_life_expectancy_5, 
+        'cohort_size': da_cohort_size,
+        'mask': None,
+    }
+
+
+    # TODO: harmonize what countries are included in d_countries? based on overlap between all sources 
+    # otherwise you have all the countries in all the objects
+    # TODO: see if Amaury needs other objects I didn't include in d_countries 
+
+    return d_countries
 
 
 
-
-# TODO ADD A WRAPPER FUNCTION THAT MAKES THE ORIGINAL DICTIONARY d_countries LUKE WAS OUTPUTTING, FOR S2S 
 
 
 
@@ -822,17 +920,5 @@ def population_demographics_gridscale_global(
     return da_pop_demographics
 
 
-
-# def population_demographics_gridscale_selcountries(
-#     startyear=2000,
-#     endyear=2005,
-#     ssp=2,
-#     urbanrural=False,
-#     countrylist=None
-# ):
-
-#     pass # TO DEVELOP for a single country / selected countries 
-
-#     return da_pop_demographics
 
 

@@ -50,9 +50,9 @@ data_dir = os.path.join(script_dir, 'data')
 
 if flags['version'] == 1: 
 
-    dir_population = os.path.join(script_dir, 'data/gridded-pop/') 
-    dir_cohortsizes = os.path.join(script_dir, 'data/cohort-sizes/WCDE')
-    filepath_countrymask = os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_fractional_'+float_to_str(flags['pop_resolution'])+'deg.nc')
+    dir_population = os.path.join(data_dir, 'gridded-pop/') 
+    dir_cohortsizes = os.path.join(data_dir, 'cohort-sizes/WCDE')
+    filepath_countrymask = os.path.join(data_dir, 'country-masks/isipedia-countries/preprocessed/countrymasks_fractional_'+float_to_str(flags['pop_resolution'])+'deg_filledcoasts.nc')
     filepath_lifeexpectancy = os.path.join(data_dir, 'life-expectancy/UN_WPP2024/WPP2024_MORT_F05_1_LIFE_EXPECTANCY_BY_AGE_BOTH_SEXES.xlsx')
     filepath_lookuptable = os.path.join(data_dir, 'country-masks/lookup_table_dem4cli_v1.xlsx' )
                                          
@@ -61,7 +61,7 @@ elif flags['version'] == 2:
 
     dir_population = '/data/brussel/vo/000/bvo00012/data/dataset/COMPASS/v2/population_count/'+float_to_str(flags['pop_resolution'])+'deg' # make a symlink in dem4cli? 
     dir_cohortsizes = os.path.join(data_dir, 'cohort-sizes/WCDE_v3.2.beta')
-    filepath_countrymask = os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_fractional_'+float_to_str(flags['pop_resolution'])+'deg.nc')
+    filepath_countrymask = os.path.join(data_dir, 'country-masks/isipedia-countries/preprocessed/countrymasks_fractional_'+float_to_str(flags['pop_resolution'])+'deg_filledcoasts.nc')
     filepath_lifeexpectancy = os.path.join(data_dir, 'life-expectancy/UN_WPP2024/WPP2024_MORT_F05_1_LIFE_EXPECTANCY_BY_AGE_BOTH_SEXES.xlsx')
     filepath_lookuptable_original = '/data/brussel/vo/000/bvo00012/data/dataset/COMPASS/v2/'+'cross_reference_SSP3_2_to_ISO.xlsx'
     filepath_lookuptable = os.path.join(data_dir, 'country-masks/lookup_table_dem4cli_v2.csv')

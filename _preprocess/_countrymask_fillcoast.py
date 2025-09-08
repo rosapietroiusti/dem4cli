@@ -9,10 +9,6 @@ import sys, os, glob
 print(os.getcwd())
 
 
-filepath_countrymask = os.path.join(
-    '/data/brussel/vo/000/bvo00012/vsc10419/demographics4climate/data/country-masks/isipedia-countries/countrymasks_fractional_05deg.nc')
-
-
 #%%
 
 def load_countrymasks_fillcoasts(
@@ -58,6 +54,12 @@ def load_countrymasks_fillcoasts(
 
     return da_countrymasks.rename({'variable':'country'})
 
+#%%
+
+filepath_countrymask = os.path.join(
+    '/data/brussel/vo/000/bvo00012/vsc10419/demographics4climate/data/country-masks/isipedia-countries/countrymasks_fractional_05deg.nc')
+
+
 da_countrymasks = load_countrymasks_fillcoasts(
     filepath_countrymask=filepath_countrymask,
     fillcoast=True,
@@ -65,4 +67,29 @@ da_countrymasks = load_countrymasks_fillcoasts(
     bbox=None,
     )
 
-da_countrymasks.to_netcdf('data/country-masks/isipedia-countries/countrymasks_fractional_05deg_filledcoasts.nc')
+da_countrymasks.to_netcdf('../data/country-masks/isipedia-countries/countrymasks_fractional_05deg_filledcoasts.nc')
+
+#%%
+
+# remove "variable dimension", not needed and save (then delete old)
+
+filepath_in = '../data/country-masks/isipedia-countries/countrymasks_fractional_05deg_filledcoasts.nc'
+ds=xr.open_dataset(filepath_in, chunks='auto')
+da_countrymasks = ds.to_array()
+
+filepath_out = '../data/country-masks/isipedia-countries/preprocessed/countrymasks_fractional_05deg_filledcoasts.nc'
+
+da_countrymasks.isel(variable=0).to_netcdf(filepath_out)
+
+# %%
+
+
+filepath_in = '../data/country-masks/isipedia-countries/countrymasks_fractional_01deg_filledcoasts.nc'
+ds=xr.open_dataset(filepath_in, chunks='auto')
+da_countrymasks = ds.to_array()
+
+filepath_out = '../data/country-masks/isipedia-countries/preprocessed/countrymasks_fractional_01deg_filledcoasts.nc'
+
+da_countrymasks.isel(variable=0).to_netcdf(filepath_out)
+
+# %%
