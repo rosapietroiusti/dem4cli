@@ -1,15 +1,13 @@
 # Demographics4Climate
 
-This is a stand-alone module to preprocess demographic data (i.e. population size, cohort size, life expectancy) at yearly resolution at gridscale level and at national level. 
+This is a stand-alone module to preprocess demographic data (i.e. population size, cohort size, life expectancy) at yearly resolution at gridscale level and at national level, and compute lifetime exposure from an annual climate dataset that the user can flexibly provide.  
 
-Based on Thiery et al (2021), Grant et al (2025), Vanderkelen et al (in prep), Pietroiusti et al (in prep), Laridon et al (in prep).
-
-Updated in 2025 with new available data. Currently possible to run for 1950-2100 under SSP1, SSP2 or SSP3. 
+Based on Thiery et al (2021), Grant et al (2025), Vanderkelen et al (in prep), Pietroiusti et al (in prep), Laridon et al (in prep). Updated in 2025 with new available data.
 
 Contact: rosa.pietroiusti@vub.be
 
 > [!WARNING]
-> Work in progress: functions to calculate lifetime exposure, at country and gridscale level, based on Grant et al (2025).
+> Work in progress: functions to calculate lifetime exposure.
 
 ## Data used in version 2
 
