@@ -11,11 +11,11 @@ Contact: rosa.pietroiusti@vub.be
 
 ## Data used in version 2
 
-1. Population cohort size from 1950 to 2100 per country (reconstructions and projections). Dem4cli-v2 currently uses data from Wittgenstein Center, SSPs drivers version 3.2-beta (May 2025 release, not publicly distributed yet, request for access). Cohort size data is available at a country level for the period 1950-2100 (reconstructions up to 2025 and projections thereafter) expressed for 5-year age cohorts at 5-year time snapshots. Dem4cli supports running the module for this data for SSP1, SSP2, SSP3.
-2. Gridded population data reconstructions and projections for SSP1, SSP2 and SSP3. Dem4cli-v2 currently uses data from the COMPASS project (credit: Dominik Paprotny, [documentation here](https://compass-climate.eu/Public%20Deliverables/D3.1_Exposure%20datasets%20at%20multiple%20scales.pdf)), for the period 1950-2100, reconstructions until 2025 and projections thereafter, harmonized with SSP version 3.2-beta national totals for projections. Not publicly distributed yet, request for access. 
-3. Life expectancy data from UNWPP2024 expressed as years left to live at the age of 5 (ex) (UNWPP2024, https://population.un.org/wpp/downloads?folder=Standard%20Projections&group=Mortality)
-3. Isipedia fractional country masks (Perrette 2023, https://github.com/ISI-MIP/isipedia-countries). 
-4. Metadata on income levels and regions from World Bank (WB 2023, https://datatopics.worldbank.org/world-development-indicators/the-world-by-income-and-region.html)
+1. **Population cohort sizes** from 1950 to 2100 per country (reconstructions and projections). Dem4cli-v2 currently uses data from Wittgenstein Center, SSPs drivers version 3.2-beta (May 2025 release, not publicly distributed yet, request for access). Cohort size data is available at a country level for the period 1950-2100 (reconstructions up to 2025 and projections thereafter) expressed for 5-year age cohorts at 5-year time snapshots. Dem4cli supports running the module for this data for SSP1, SSP2, SSP3.
+2. **Gridded population data** reconstructions and projections for SSP1, SSP2 and SSP3. Dem4cli-v2 currently uses data from the COMPASS project (credit: Dominik Paprotny, [documentation here](https://compass-climate.eu/Public%20Deliverables/D3.1_Exposure%20datasets%20at%20multiple%20scales.pdf)), for the period 1950-2100, reconstructions until 2025 and projections thereafter, harmonized with SSP version 3.2-beta national totals for projections. Not publicly distributed yet, request for access. 
+3. **Life expectancy data** from UNWPP2024 expressed as years left to live at the age of 5 (ex) (UNWPP2024, https://population.un.org/wpp/downloads?folder=Standard%20Projections&group=Mortality)
+3. **Isipedia fractional country masks** (Perrette 2023, https://github.com/ISI-MIP/isipedia-countries). 
+4. **Metadata on income levels and regions** from World Bank (WB 2023, https://datatopics.worldbank.org/world-development-indicators/the-world-by-income-and-region.html)
 
 ### Data availability 
 
