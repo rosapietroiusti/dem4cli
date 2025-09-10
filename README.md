@@ -33,6 +33,21 @@ To run dem4cli, you can include the 'data' folder in the same folder as the 'pop
 
 ## What this module does 
 
+You can set your settings in _settings.py
+
+
+```
+flags = {}
+
+flags['version'] = 2 
+                                    # v1 
+                                    # v2 : new gridded population and cohortsize data 
+
+
+flags['pop_resolution'] = 0.5       # 0.1 or 0.5 degrees (regular grid) for v2, only 0.5 degrees for v1 
+
+```
+
 ### Part 1: Demographic Data Preprocessing at country-level
 
 WCDE cohort size estimates are linearly interpolated from age-brackets to exact ages, correcting such that the mean is preserved, and then linearly interpolated from snapshots every 5 years to yearly values, so that you have a cohort size value for each exact age each year. 
@@ -58,7 +73,7 @@ d_countries = preprocess_all_country_data(
     dir_population= dir_population,                     # gridded pop data 
     startyear=1950,
     endyear=2100,
-    bbox = None,                                        # option to provide a bounding box to crop/select data
+    bbox = None,                                        # option to provide a bounding box
 
     filepath_countrymask = filepath_countrymask,        # country masks 
     
@@ -87,6 +102,8 @@ da_cohort_size = d_countries['cohort_size']
  
 > [!WARNING]
 > Work in progress
+
+
 
 
 ### Part 3: Gridscale Demographics (currently only tested for dem4cli-v1)
