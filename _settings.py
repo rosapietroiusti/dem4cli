@@ -32,7 +32,7 @@ flags['version'] = 2
                         # v2.0 : new pop data, new cohortsize data, 
 
 
-flags['pop_resolution'] = 0.1 # 0.1 or 0.5 for v2, only 0.5 for v1 
+flags['pop_resolution'] = 0.5 # 0.1 or 0.5 for v2, only 0.5 for v1 
 
 flags['GMT_mapping'] = 'year_to_year'
                         # 'year_to_year' = Wim/Luke method
@@ -65,6 +65,10 @@ elif flags['version'] == 2:
     filepath_lifeexpectancy = os.path.join(data_dir, 'life-expectancy/UN_WPP2024/WPP2024_MORT_F05_1_LIFE_EXPECTANCY_BY_AGE_BOTH_SEXES.xlsx')
     filepath_lookuptable_original = '/data/brussel/vo/000/bvo00012/data/dataset/COMPASS/v2/'+'cross_reference_SSP3_2_to_ISO.xlsx'
     filepath_lookuptable = os.path.join(data_dir, 'country-masks/lookup_table_dem4cli_v2.csv')
+
+
+filepath_isimip_countries_meta = os.path.join(data_dir, 'country-masks/isipedia-countries/countryData.json')
+filepath_world_bank_meta = os.path.join(data_dir, 'income-groups/world_bank/CLASS.xlsx')
 
 
 # settings for GMT mapping / stylized trajectory creation

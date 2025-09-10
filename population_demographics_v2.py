@@ -31,12 +31,11 @@ from _settings import *
 # 1. Metadata 
 # ---------------------------------
 
-# is this getting used anywhere? 
-# only v1
+
 
 def load_country_metadata(
-    filepath_isimip_countries = os.path.join(script_dir, 'data/country-masks/isipedia-countries/countryData.json'),
-    filepath_world_bank = os.path.join(script_dir, 'data/income-groups/world_bank/CLASS.xlsx'), # what year is this from? 
+    filepath_isimip_countries = filepath_isimip_countries_meta,
+    filepath_world_bank = filepath_world_bank_meta, # what year is this from? 
     keep_names='isimip',
     keep_stats=False,
 
@@ -53,7 +52,7 @@ def load_country_metadata(
         keep stats (Bool) from isimip_countries 
     
     Returns
-        df_metadata: table with country name, ISO3 code, country code, region and income group, where available
+        df_metadata: table with country name, ISO3 code, country code, region and income group, where available = countries that are both in WB and ISIPEDIA mask
     
     """
 
@@ -67,15 +66,15 @@ def load_country_metadata(
     # keep only some of the info and clean up column names 
     if keep_names =='isimip':
         keep_cols = ['country', 'Code', 'country_code','Region', 'Income group']
-        d_rename = {'Code':'country_iso3', 'Region':'region', 'Income group': 'income_group'}
+        d_rename = {'Code':'abbreviation', 'Region':'region', 'Income group': 'incomegroup'}
         
     elif keep_names == 'world_bank':
         keep_cols =['Economy', 'Code', 'country_code','Region', 'Income group']
-        d_rename={'Economy':'country','Code':'country_iso3', 'Region':'region', 'Income group': 'income_group'}
+        d_rename={'Economy':'country','Code':'abbreviation', 'Region':'region', 'Income group': 'incomegroup'}
         
     elif keep_names == 'both':
         keep_cols=['country','Economy', 'Code', 'country_code','Region', 'Income group']
-        d_rename={'Economy':'country_wb','Code':'country_iso3', 'Region':'region', 'Income group': 'income_group'}     
+        d_rename={'Economy':'country_wb','Code':'abbreviation', 'Region':'region', 'Income group': 'incomegroup'}     
 
     if keep_stats == True:
         keep_cols=keep_cols+list(df_isimip_metadata.columns[3:])
@@ -85,9 +84,49 @@ def load_country_metadata(
     return df_metadata
 
 
+def filter_countries_all_datasets(
+    filepath_lookuptable=filepath_lookuptable,      # all data sources
+    df_metadata=None,                               # worldbank and country mask matched already 
+    da_countrymasks = None,
+    worldbank_filter=True, 
+):
+
+    # lookup table: 249 countries
+    
+    df = pd.read_csv(filepath_lookuptable)
+    
+    df = df.merge(pd.DataFrame(da_countrymasks.country.to_pandas().rename('iso3_mask')), how='outer', left_on='ISO alpha-3', right_on='country')
+
+    df_overlap = df[
+                    (df[["SSP name", "WPP name", "iso3_mask"]].notna().all(axis=1)) &
+                    (df["Data availability"] == "Full historical + SSP")
+                ].reset_index(drop=True)
+
+    if worldbank_filter:
+
+        # only include countries that are also in WB categorization (and have all demographic data): results in 185 world countries 
+        
+        df_metadata_filtered = df_metadata.merge(df_overlap, how='inner', left_on='abbreviation', right_on='ISO alpha-3').reset_index(drop=True)
+
+        df_metadata_filtered = df_metadata_filtered[['country', 'abbreviation', 'region', 'incomegroup', 'country_code', 'SSP name', 'WPP name'   ]]
+
+    else: 
+
+        # include all countries that have all demographic data: results in 198 world countries
+
+        df_metadata_filtered = df_metadata.merge(df_overlap, how='right', left_on='abbreviation', right_on='ISO alpha-3').reset_index(drop=True)
+
+        df_metadata_filtered = df_metadata_filtered[['country', 'iso3_mask', 'region', 'incomegroup', 'ISO numeric', 'SSP name', 'WPP name'  ]]
+        df_metadata_filtered = df_metadata_filtered.rename(columns={'iso3_mask':'abbreviation', 'ISO numeric': 'country_code' })
+
+
+    return df_metadata_filtered.set_index('abbreviation')
+
+
+
+
 
 # COULD DELETE THIS ! Not getting used 
-#v1
 
 def load_country_stats(
     filepath_isimip_stats = os.path.join(script_dir, 'data/country-masks/isipedia-countries/countryprofiledata.json')
@@ -715,38 +754,44 @@ def preprocess_all_country_data(
     preprocess=False,                               # NOTE preprocessing is already done in standard input files 
     fillcoast=False, 
     fix_smallislands=False,
+    
+    filepath_lookuptable = filepath_lookuptable,    # country filtering
+    filter_countries=True,
+    worldbank_filter=True, 
 
     ):
 
-    df_cohort_sizes, ages, years = load_cohort_sizes(dir_cohortsizes, ssp=ssp, by_sex=by_sex)
     # loads raw cohort size data from historical + ssp and cleans to keep only relevant information
-
+    df_cohort_sizes, ages, years = load_cohort_sizes(dir_cohortsizes, ssp=ssp, by_sex=by_sex)
+    # interpolates cohort sizes from 5 year to single year and corrects to preserve mean
     da_cohort_size = interpolate_cohortsize_countries(
                         df_cohort_sizes,
                         ages,
                         years,
                     )
-    # interpolates cohort sizes from 5 year to single year and corrects to preserve mean
 
 
-    df_unwpp = load_unwpp_lifeexpectancy(filepath_lifeexpectancy = filepath_lifeexpectancy) 
     # load life expectancy data and clean 
-
+    df_unwpp = load_unwpp_lifeexpectancy(filepath_lifeexpectancy = filepath_lifeexpectancy) 
+    # go from 'period' to 'cohort' life expectancy
     df_life_expectancy_5 = get_life_expectancies(df_unwpp,
                                             start_birthyear=start_birthyear,
                                             end_birthyear=end_birthyear) 
-    # go from 'period' to 'cohort' life expectancy
 
+
+    # load gridded population data, optional cropping
     da_population = load_population(
     dir_population= dir_population, 
     startyear=startyear,
     endyear=endyear,
     ssp=ssp,
     urbanrural=urbanrural,
-    bbox = bbox 
-    )
-    # load gridded population data, optional cropping
+    bbox = bbox ,
 
+
+    )
+
+    # open countrymasks, optional preprocessing (already done in default input files)
     da_countrymasks = load_countrymasks_fillcoasts(
                             filepath_countrymask,
                             preprocess=preprocess, 
@@ -754,28 +799,58 @@ def preprocess_all_country_data(
                             fix_smallislands=fix_smallislands, # done in preprocessed input files for 0.5, not for 0.1 
                             bbox=bbox,
                             )
-    # open countrymasks, optional preprocessing (already done in default input files)
+    
+
+
+    # filter countries you want to use in analysis 
+    # in all datasets and have world bank income level info = 185 countries , in all datasets but not worldbank = 198 countries
+
+    if filter_countries:
+
+        # get worldbank metadata
+        df_metadata =  load_country_metadata(
+        filepath_isimip_countries = filepath_isimip_countries_meta,
+        filepath_world_bank = filepath_world_bank_meta, 
+        keep_names='isimip',
+        keep_stats=False,)
+
+        # filter countries you want to use in analysis
+        # based on da_countrymask (e.g. if cropped they get dropped), data availability (lookuptable), worldbank categorization (worldbank_filter T/F)
+        df_metadata_filter = filter_countries_all_datasets(
+                                df_metadata=df_metadata,
+                                filepath_lookuptable=filepath_lookuptable,
+                                worldbank_filter=worldbank_filter, # T = 185 countries, F = 198 countries
+                                da_countrymasks = da_countrymasks,
+                            )
+
+
+        # filter all objects before packing
+        select = da_countrymasks.country.isin(df_metadata_filter.index)
+        da_countrymasks = da_countrymasks.sel(country=select)
+        df_countries = df_metadata_filter
+        df_life_expectancy_5 = df_life_expectancy_5[df_countries["WPP name"]]
+        da_cohort_size = da_cohort_size.sel(country=df_countries["SSP name"].to_list())
+        
+
+        # TODO: harmonize the country naming in the objects? e.g. use only the ISO3 abbreviation? rename! See with compatibility later 
+
+        # TODO: make more flexible country list harmonization option, especially if cohortsizes comes from UNWPP! 
 
 
     # pack country information
     d_countries = {
-        'info_pop': None, # df_countries 
-        'borders': da_countrymasks, # note this is now a dataarray not geodf borders
+        'info_pop': df_countries,
+        'borders': da_countrymasks,     # NOTE: this is now a dataarray not geodf borders !! adapt later fxns
         'population_map': da_population,
         'birth_years': None,
         'life_expectancy_5': df_life_expectancy_5, 
         'cohort_size': da_cohort_size,
-        'mask': None,
+        'mask': None,                   # NOTE: is this necessary?
     }
 
 
-    # TODO: harmonize what countries are included in d_countries? before making the dict, 
-    # based on overlap between all sources 
-    # otherwise you have all the countries in all the objects, except dropped in mask is bbox is used 
-
     # TODO: see if Amaury needs other objects I didn't include in d_countries 
-    # I think he will need df_countries / info_pop to determine what countries to use in analysis
-    # not sure what 'mask' was for
+
 
     return d_countries
 
