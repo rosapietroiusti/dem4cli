@@ -92,7 +92,7 @@ def filter_countries_all_datasets(
 ):
 
     # lookup table: 249 countries
-    
+
     df = pd.read_csv(filepath_lookuptable)
     
     df = df.merge(pd.DataFrame(da_countrymasks.country.to_pandas().rename('iso3_mask')), how='outer', left_on='ISO alpha-3', right_on='country')
@@ -769,6 +769,8 @@ def preprocess_all_country_data(
                         ages,
                         years,
                     )
+
+                    # TODO: crop years here too !! 
 
 
     # load life expectancy data and clean 
