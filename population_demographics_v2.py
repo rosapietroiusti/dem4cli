@@ -91,6 +91,8 @@ def filter_countries_all_datasets(
     worldbank_filter=True, 
 ):
 
+# see slightly different version in S2S !! 
+
     # lookup table: 249 countries
 
     df = pd.read_csv(filepath_lookuptable)
@@ -847,7 +849,7 @@ def preprocess_all_country_data(
         'birth_years': None,
         'life_expectancy_5': df_life_expectancy_5, 
         'cohort_size': da_cohort_size,
-        'mask': None,                   # NOTE: is this necessary?
+        'mask': (None, None),                  # NOTE: is this necessary?
     }
 
 
