@@ -151,13 +151,14 @@ def load_country_stats(
 
 def load_cohort_sizes( 
     dir_cohortsizes = dir_cohortsizes,
+    data_source = flags['cohort_sizes_source'], # 'WCDE' or 'UNWPP2024' 
     ssp = 2,
-    by_sex = False
+    by_sex = False,
 ):
     """
     load population size per age cohort from Wittgenstein Center Data Explorer.
     
-    Version 1: (source: http://dataexplorer.wittgensteincentre.org/wcde-v2/)
+    Version 1: WCDE v2 (source: http://dataexplorer.wittgensteincentre.org/wcde-v2/)
 
     Version 2: version 3.2 beta (for CMIP7)
 
@@ -167,18 +168,21 @@ def load_cohort_sizes(
     Here we assign the data to the central age cohort (i.e. 0-4 assigned to 2).
     
     Input
-        filepaths_wcde (str): path to csv files for different ssps
-        ssp (int): 1,2 or 3 for ssp1, ssp2, ssp3
+        dir_cohortsizes (str): path to cohortsize files
+        ssp (int): 1,2 or 3 for ssp1, ssp2, ssp3 (only if data_source == 'WCDE')
         by_sex (Bool): TODO (data is available male/female) - in version 2 this is automatic
 
     Returns
-        df_cohort_sizes (df): rows are countries, columns are a cohort's (e.g. age=2) 
-                                size each year, then the next cohort (columns labelled e.g. 2_1950 age=2, year=1950) 
-                                (version 1, in version 2 its a self-explanatory data array)
+        df_cohort_sizes (v1: df, v2: da):   v1: rows are countries, columns are a cohort's (e.g. age=2) 
+                                            size each year, then the next cohort (columns labelled e.g. 2_1950 age=2, year=1950) 
+                                            v2: data array indexed by age 
         ages (arr) : central year of interval (2,7...102)
         years (arr) : years we have data for (1950, 1955...2100)
 
-    Note: this also exists from UNWPP2024! Could be more consistent with life expectancy data 
+    Note: 
+    - this also exists from UNWPP2024! Could be more consistent with life expectancy data 
+    - in v2 its a da not a df !!! TODO: change version 1 so it also gives a da?  
+
     """
 
     def convert_age_range(age):
@@ -190,90 +194,135 @@ def load_cohort_sizes(
                 return int(match.group(1))
             else:
                 return int(age)
-            
+    
+    print(f'loading cohort sizes from {data_source}')
 
     if flags['version'] == 1:
 
-        # open wcde cohort size file 
-        filepath = dir_cohortsizes+f'/wicdf_ssp{ssp}.csv'
-        df_raw = pd.read_csv(filepath, header=7) # population is in 000's
-
-        # cohort size specific
-        if not by_sex:
-
-            # select only relevant rows and cols
-            df = df_raw[(df_raw['Sex'] == 'Both') & (df_raw['Age'] != 'All')][['Area', 'Year', 'Age', 'Population']]
-            
-            # central year in age bracket e.g. 0-4 becomes 2, 5-9 becomes 7 
-            df['Age'] = df['Age'].apply(convert_age_range) + 2 
-                
-            # Initialize an empty DataFrame for the final result
-            df_cohort_sizes = pd.DataFrame()
-            # Get unique ages
-            ages = df['Age'].unique()
-            years = df['Year'].unique()
-            
-            # Loop through each age and pivot the data
-            for age in ages:
-                subset = df[df['Age'] == age].pivot(index='Area', columns='Year', values='Population')
-                subset.columns = [f'{age}_{year}' for year in subset.columns] # name the columns e.g. 2_1950
-                if df_cohort_sizes.empty:
-                    df_cohort_sizes = subset
-                else:
-                    df_cohort_sizes = df_cohort_sizes.join(subset, how='outer')
+        if not data_source == 'WCDE':
+            print(f'error method cohort size undefined in v1 for {data_source}')
 
         else:
-            pass
-            # TO DEVELOP ! BY SEX ! 
+
+            # open wcde cohort size file 
+            filepath = dir_cohortsizes+f'/wicdf_ssp{ssp}.csv'
+            df_raw = pd.read_csv(filepath, header=7) # population is in 000's
+
+            if not by_sex:
+
+                # select only relevant rows and cols
+                df = df_raw[(df_raw['Sex'] == 'Both') & (df_raw['Age'] != 'All') & (df_raw['Area'] != 'World')][['Area', 'Year', 'Age', 'Population']]
+                
+                # central year in age bracket e.g. 0-4 becomes 2, 5-9 becomes 7 
+                df['Age'] = df['Age'].apply(convert_age_range) + 2 
+                    
+                # Initialize an empty DataFrame for the final result
+                df_cohort_sizes = pd.DataFrame()
+                # Get unique ages
+                ages = df['Age'].unique()
+                years = df['Year'].unique()
+                
+                # Loop through each age and pivot the data
+                for age in ages:
+                    subset = df[df['Age'] == age].pivot(index='Area', columns='Year', values='Population')
+                    subset.columns = [f'{age}_{year}' for year in subset.columns] # name the columns e.g. 2_1950
+                    if df_cohort_sizes.empty:
+                        df_cohort_sizes = subset
+                    else:
+                        df_cohort_sizes = df_cohort_sizes.join(subset, how='outer')
+
+            else:
+                
+                pass
+                # to develop by sex 
 
     elif flags['version'] == 2:
 
-        filepath = dir_cohortsizes+f'/ssp_basic_drivers_release_3.2.beta_full.xlsx'
-        df = pd.read_excel(filepath, sheet_name=1)
+        if data_source == 'WCDE': # cohort sizes from SSP projections v3.2-beta
 
-        # Exclude rows where 'region' contains (R<number>), i.e. world regions
-        df = df[~df['Region'].str.contains(r"\(R\d+\)", regex=True, na=False)]
+            filepath = dir_cohortsizes+f'/ssp_basic_drivers_release_3.2.beta_full.xlsx'
+            df = pd.read_excel(filepath, sheet_name=1)
 
-        # Keep only "Population|Male|Age <age>" or "Population|Female|Age <age>"
-        population_pattern = (r"^Population\|(Male|Female)\|Age\s(\d{1,2}(-\d{1,2})?|100\+)$")
-        df = df[df['Variable'].str.contains(population_pattern, regex=True, na=False)]
+            # Exclude rows where 'region' contains (R<number>), i.e. world regions
+            df = df[~df['Region'].str.contains(r"\(R\d+\)", regex=True, na=False)]
 
-        # Extract sex and age from Variable
-        df['sex'] = df['Variable'].str.extract(r"^Population\|(Male|Female)", expand=False)
-        df['age'] = df['Variable'].str.extract(r"Age\s([\d\+]+(?:-\d+)?)", expand=False)
+            # Keep only "Population|Male|Age <age>" or "Population|Female|Age <age>"
+            population_pattern = (r"^Population\|(Male|Female)\|Age\s(\d{1,2}(-\d{1,2})?|100\+)$")
+            df = df[df['Variable'].str.contains(population_pattern, regex=True, na=False)]
 
-        # Melt year columns to long format
-        year_cols = [c for c in df.columns if re.match(r"^\d{4}$", str(c))]
-        df_long = df.melt(
-            id_vars=['Region', 'sex', 'age','Scenario'],
-            value_vars=year_cols,
-            var_name='time',
-            value_name='population'
-        )
-        # clean 
-        df_long['time'] = df_long['time'].astype(int)
-        df_long['Scenario'] = df_long['Scenario'].replace({'Historical Reference': 'historical'})
+            # Extract sex and age from Variable
+            df['sex'] = df['Variable'].str.extract(r"^Population\|(Male|Female)", expand=False)
+            df['age'] = df['Variable'].str.extract(r"Age\s([\d\+]+(?:-\d+)?)", expand=False)
 
-        # central year in age bracket e.g. 0-4 becomes 2, 5-9 becomes 7 
-        df_long['age'] = df_long['age'].apply(convert_age_range) + 2 
+            # Melt year columns to long format
+            year_cols = [c for c in df.columns if re.match(r"^\d{4}$", str(c))]
+            df_long = df.melt(
+                id_vars=['Region', 'sex', 'age','Scenario'],
+                value_vars=year_cols,
+                var_name='time',
+                value_name='population'
+            )
+            # clean 
+            df_long['time'] = df_long['time'].astype(int)
+            df_long['Scenario'] = df_long['Scenario'].replace({'Historical Reference': 'historical'})
 
-        # make into a data array for easy indexing 
-        da = df_long.set_index(['Region', 'time', 'age', 'sex', 'Scenario']).to_xarray()['population']
-        da = da.rename({'Region':'country', 'Scenario':'ssp'})
+            # central year in age bracket e.g. 0-4 becomes 2, 5-9 becomes 7 
+            df_long['age'] = df_long['age'].apply(convert_age_range) + 2 
 
-        # select SSP and merge historical + SSP
-        da = da.sel(ssp=['historical', f'SSP{ssp}']).max(dim="ssp")
+            # make into a data array for easy indexing 
+            da = df_long.set_index(['Region', 'time', 'age', 'sex', 'Scenario']).to_xarray()['population']
+            da = da.rename({'Region':'country', 'Scenario':'ssp'})
 
-        # get ages and years
-        ages = da.age.values
-        years = da.time.values
+            # select SSP and merge historical + SSP
+            da = da.sel(ssp=['historical', f'SSP{ssp}']).max(dim="ssp") * 1000 # data provided as millions, convert to thousands
 
-        if not by_sex:
-            da = da.sum(dim='sex') # in the alternative it doesnt really get used anyway... 
+            # get ages and years
+            ages = da.age.values
+            years = da.time.values
 
-        df_cohort_sizes = da.where(da.country != 'World', drop=True)
- 
-        # note its a da not a df !!! TODO: change the version 1 so it also gives a da? or rename this to cohortsizes_raw or something! 
+            if not by_sex:
+                da = da.sum(dim='sex') 
+
+            df_cohort_sizes = da.where(da.country != 'World', drop=True) # remove 'World'
+    
+
+        elif data_source == 'UNWPP2024': # cohort sizes from UNWPP2024 historical estimates and median projections
+
+            filepath = dir_cohortsizes+'/WPP2024_POP_F01_1_POPULATION_SINGLE_AGE_BOTH_SEXES.xlsx'
+
+            df_list = []
+
+            for sheet in [0,1]: # sheet 0 has historical estimates, sheet 1 has projections
+                df_unwpp_raw = pd.read_excel(filepath, 
+                sheet_name=sheet,
+                skiprows=16) # make this more flex 
+        
+                # load data and select only data you want
+                df_unwpp = df_unwpp_raw[df_unwpp_raw['Type']=='Country/Area'].rename( # get rid of World/region/subregion, keep only countries 
+                        columns={'Region, subregion, country or area *':'country', '100+':'100', 'Year':'time'}) # make this more flex 
+                cols = df_unwpp.columns
+                idxs = [i for i, col in enumerate(cols) if col in ('country', 'time') or (isinstance(col, int) and 0 <= col < 101)] # cohort size each age each year
+                df_unwpp = df_unwpp.iloc[:, idxs]
+                df_unwpp['time'] = df_unwpp['time'].astype(int)
+
+                df_list.append(df_unwpp)
+            
+            # concat historical and projections
+            df_unwpp = pd.concat(df_list, axis=0)
+
+            # convert to data array 
+            df_indexed = df_unwpp.set_index(['country', 'time'])
+            da = df_indexed.to_xarray()
+            da = da.to_array(dim='age')          # 'ages' is now a dim
+            da = da.assign_coords(age=[int(a) for a in da.age.values])  # convert ages to ints
+
+            # get ages and years
+            ages = da.age.values
+            years = da.time.values
+
+            df_cohort_sizes = da.rename({'age':'ages'}).astype(float)
+
+
 
     return df_cohort_sizes, ages, years
 
@@ -283,122 +332,130 @@ def interpolate_cohortsize_countries(
     df_cohort_sizes,
     cohort_ages,
     cohort_years,
+    data_source = flags['cohort_sizes_source'],
+    extend_method = 'slinear',  # add this flag ??
+    startyear= 1950,
+    endyear = None, # should be last birthyear of interest (2025) + max life expectancy 
 ): 
     """
-    Interpolate cohortsizes from 5 year age brackets to year to year
+    Interpolate cohortsizes from 5 year age brackets to year to year - only necessary for SSP data 
     """
 
-    # keep all possible countries (better, you lose less places)
-    df_cohort_size_filter = df_cohort_sizes 
-    
-    def distribute_error_across_years(df_y_values, df_y_mean_bracket, bracket_size): 
-        # for a single year / single country in the dataset distribute error in age bracket
-        
-        # ignore warnings, we get rid of nans later with the nansum
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=RuntimeWarning)
-            
-            # reshape df to array, each row is a bracket, each column is a specific age in that bracket 
-            y_values = np.reshape(df_y_values.values, (len(df_y_values)//bracket_size, bracket_size)) #nrows, ncols
-            # calculate interpolation error over the bracket as the sum of errors
-            delta_bracket = np.sum(y_values - df_y_mean_bracket.values[:, np.newaxis], axis=1) # sums along row
-            # calculate relative weights as the value divided by the sum of all values in the bracket
-            sum_over_years = np.sum(y_values, axis=1)
-            weights = y_values / sum_over_years[:, np.newaxis]
-            # compute correction for each y value
-            delta_i = weights * delta_bracket[:, np.newaxis]
-            # correct the y values 
-            y_corrected = np.nansum(np.dstack((y_values,-delta_i)),2).reshape(-1)
-            
-        return y_corrected
+    if not data_source == 'UNWPP2024':
 
-    if flags ['version'] == 1 : 
-        wcde_years, wcde_ages, wcde_country_data = cohort_years, cohort_ages, df_cohort_size_filter.values 
-        countries = df_cohort_size_filter.index
-
-    elif flags ['version'] == 2 : 
-        wcde_years, wcde_ages = cohort_years, cohort_ages
-        countries = df_cohort_size_filter.country.values # its not a df its a da in v2! 
-    
-    # initialise dictionary to store cohort sizes dataframes per country with years as rows and ages as columns
-    d_cohort_size = {}
-    
-    # loop over countries
-    print('interpolating cohort sizes per country')
-    for i,name in enumerate(countries):
-        # extract population size per age cohort data from WCDE file and linearly interpolate from 5-year WCDE blocks to pre-defined birth year
+        # keep all possible countries (better, you lose less places)
+        df_cohort_size_filter = df_cohort_sizes 
         
+        def distribute_error_across_years(df_y_values, df_y_mean_bracket, bracket_size): 
+            # for a single year / single country in the dataset distribute error in age bracket
+            
+            # ignore warnings, we get rid of nans later with the nansum
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                
+                # reshape df to array, each row is a bracket, each column is a specific age in that bracket 
+                y_values = np.reshape(df_y_values.values, (len(df_y_values)//bracket_size, bracket_size)) #nrows, ncols
+                # calculate interpolation error over the bracket as the sum of errors
+                delta_bracket = np.sum(y_values - df_y_mean_bracket.values[:, np.newaxis], axis=1) # sums along row
+                # calculate relative weights as the value divided by the sum of all values in the bracket
+                sum_over_years = np.sum(y_values, axis=1)
+                weights = y_values / sum_over_years[:, np.newaxis]
+                # compute correction for each y value
+                delta_i = weights * delta_bracket[:, np.newaxis]
+                # correct the y values 
+                y_corrected = np.nansum(np.dstack((y_values,-delta_i)),2).reshape(-1)
+                
+            return y_corrected
+
         if flags ['version'] == 1 : 
-            wcde_per_country = np.reshape(wcde_country_data[i,:],((len(wcde_ages),len(wcde_years)))) 
-            wcde_per_country_df = pd.DataFrame(
-                wcde_per_country,
-                index=wcde_ages,
-                columns=wcde_years
-            )
+            wcde_years, wcde_ages, wcde_country_data = cohort_years, cohort_ages, df_cohort_size_filter.values 
+            countries = df_cohort_size_filter.index
+
         elif flags ['version'] == 2 : 
-            wcde_per_country_df = df_cohort_size_filter.sel(country=name).to_pandas().T
-            # every row is an age group (len 21), every column is a year (len 31)
+            wcde_years, wcde_ages = cohort_years, cohort_ages # can get this from data itself - don't need to be arguments
+            countries = df_cohort_size_filter.country.values # its not a df its a da in v2! 
+        
+        # initialise dictionary to store cohort sizes dataframes per country with years as rows and ages as columns
+        d_cohort_size = {}
+        
+        # loop over countries
+        print('interpolating cohort sizes per country')
+        for i,name in enumerate(countries):
+            # extract population size per age cohort data from WCDE file and linearly interpolate from 5-year WCDE blocks to pre-defined birth year
+            
+            if flags['version'] == 1 : 
+                wcde_per_country = np.reshape(wcde_country_data[i,:],((len(wcde_ages),len(wcde_years)))) 
+                wcde_per_country_df = pd.DataFrame(
+                    wcde_per_country,
+                    index=wcde_ages,
+                    columns=wcde_years
+                )
+            elif flags['version'] == 2 : 
+                wcde_per_country_df = df_cohort_size_filter.sel(country=name).to_pandas().T
+                # every row is an age group (len 21), every column is a year (len 31)
 
-        # Note: now using dataframes to do reindexing and interpolation (see how much slower this makes it cfr. to numpy
-        # could do with numpy interpolate.griddata if you accept that ages 0-2 are not interpolated but held constant 
-        # decide what assumption we want to use!) 
+            # Note: now using dataframes to do reindexing and interpolation (see how much slower this makes it cfr. to numpy
+            # could do with numpy interpolate.griddata if you accept that ages 0-2 are not interpolated but held constant 
+            # decide what assumption we want to use!) 
 
-        #set new coordinates for after interpolation - check you want this & put in flags at start or something !! 
-        ages_interpn_cohorts =  np.arange(0,105) 
-        years_interpn_cohorts = np.arange(1950,2100+1)
-    
-        # interpolate per ages
-        wcde_per_country_df = wcde_per_country_df.reindex(ages_interpn_cohorts)
-        wcde_per_country_df
-        wcde_per_country_intrp = wcde_per_country_df.astype('float').interpolate(
-                method='slinear', # original 'linear' filled end values with constants; slinear calls spline linear interp/extrap from scipy interp1d - check if this is ok 
-                limit_direction='both',
-                fill_value='extrapolate',
-                axis=0
-            )
-        # set negative numbers to zero
-        wcde_per_country_intrp[wcde_per_country_intrp<0]=0
-        # fix the not mean preserving issue
-        wcde_per_country_intrp_correct = wcde_per_country_intrp.copy()
-        for y in wcde_years:
-            wcde_per_country_intrp_correct.loc[:,y] = distribute_error_across_years(
-                wcde_per_country_intrp.loc[:,y], # interpolated values
-                wcde_per_country_df.dropna().loc[:,y], # true mean
-                bracket_size=5) # bracket size 
-         
-        # check for neg numbers
-        if (wcde_per_country_intrp_correct < 0).any().any():
-            print('after interpolation and mean-preserving correction there are some neg numbers in {}, {}, setting them to zero'.format(i,name))
-            # set them to zero
-            wcde_per_country_intrp_correct[wcde_per_country_intrp_correct<0]=0
-            # TODO: modify distribute_error_across_years to not reintroduce negative numbers? 
-    
-        # interpolate between years
-        wcde_per_country_df = wcde_per_country_intrp_correct.transpose().reindex(years_interpn_cohorts)
-        wcde_per_country_intrp_years = wcde_per_country_df.astype('float').interpolate(
-                method='slinear', # original 'linear' filled end values with constants; slinear calls spline linear interp/extrap from scipy interp1d
-                limit_direction='both',
-                fill_value='extrapolate',
-                axis=0
-            )
-        d_cohort_size[name] = wcde_per_country_intrp_years / 5
-    
-        #  make a data array with the information from all the countries together
-    da_cohort_size = xr.DataArray(
-        np.asarray([v for k,v in d_cohort_size.items()]), # see whether to include nan countries here -  np.asarray([v for k,v in d_cohort_size.items() if k in df_cohort_size_filter['country'].values])
-        coords={
-            'country': ('country', countries),
-            'time': ('time', years_interpn_cohorts),
-            'ages': ('ages', ages_interpn_cohorts),
-        },
-        dims=[
-            'country',
-            'time',
-            'ages',
-        ],
-        name='cohort_size'
-)
+            #set new coordinates for after interpolation - check you want this & put in flags at start or something !! 
+            ages_interpn_cohorts =  np.arange(0,105) 
+            years_interpn_cohorts = np.arange(startyear,endyear+1)
+        
+            # interpolate per ages
+            wcde_per_country_df = wcde_per_country_df.reindex(ages_interpn_cohorts)
+            wcde_per_country_df
+            wcde_per_country_intrp = wcde_per_country_df.astype('float').interpolate(
+                    method=extend_method, # original 'linear' filled end values with constants; slinear calls spline linear interp/extrap from scipy interp1d - check if this is ok 
+                    limit_direction='both',
+                    fill_value='extrapolate',
+                    axis=0
+                )
+            # set negative numbers to zero
+            wcde_per_country_intrp[wcde_per_country_intrp<0]=0
+            # fix the not mean preserving issue
+            wcde_per_country_intrp_correct = wcde_per_country_intrp.copy()
+            for y in wcde_years:
+                wcde_per_country_intrp_correct.loc[:,y] = distribute_error_across_years(
+                    wcde_per_country_intrp.loc[:,y], # interpolated values
+                    wcde_per_country_df.dropna().loc[:,y], # true mean
+                    bracket_size=5) # bracket size 
+            
+            # check for neg numbers
+            if (wcde_per_country_intrp_correct < 0).any().any():
+                print('after interpolation and mean-preserving correction there are some neg numbers in {}, {}, setting them to zero'.format(i,name))
+                # set them to zero
+                wcde_per_country_intrp_correct[wcde_per_country_intrp_correct<0]=0
+                # TODO: modify distribute_error_across_years to not reintroduce negative numbers? 
+        
+            # interpolate between years
+            wcde_per_country_df = wcde_per_country_intrp_correct.transpose().reindex(years_interpn_cohorts)
+            wcde_per_country_intrp_years = wcde_per_country_df.astype('float').interpolate(
+                    method=extend_method, # original 'linear' filled end values with constants; slinear calls spline linear interp/extrap from scipy interp1d
+                    limit_direction='both',
+                    fill_value='extrapolate',
+                    axis=0
+                )
+            d_cohort_size[name] = wcde_per_country_intrp_years / 5 # divide by 5 for 5-year age groups
+        
+            #  make a data array with the information from all the countries together
+        da_cohort_size = xr.DataArray(
+            np.asarray([v for k,v in d_cohort_size.items()]), # see whether to include nan countries here -  np.asarray([v for k,v in d_cohort_size.items() if k in df_cohort_size_filter['country'].values])
+            coords={
+                'country': ('country', countries),
+                'time': ('time', years_interpn_cohorts),
+                'ages': ('ages', ages_interpn_cohorts),
+            },
+            dims=[
+                'country',
+                'time',
+                'ages',
+            ],
+            name='cohort_size'
+             )
 
+    else:
+        da_cohort_size = df_cohort_sizes.rename('cohort_size')
 
     return da_cohort_size
 
@@ -644,7 +701,9 @@ def load_countrymasks_fillcoasts(
 
 
 def load_unwpp_lifeexpectancy(
-        filepath_lifeexpectancy = filepath_lifeexpectancy
+        filepath_lifeexpectancy = filepath_lifeexpectancy,
+        start_birthyear=1950,
+        end_birthyear=2025
 ):
     """
     Load UNWPP2024 data on e(x) = Life Expectancy at Exact Age x (ex) - Both Sexes.
@@ -658,38 +717,42 @@ def load_unwpp_lifeexpectancy(
     https://population.un.org/wpp/downloads?folder=Standard%20Projections&group=Mortality
     
     """
+    df_list = []
 
-    
-    df_unwpp_raw = pd.read_excel(filepath_lifeexpectancy, 
-             sheet_name=0,
-             skiprows=16) # make this more flex 
-    
-    df_unwpp = df_unwpp_raw[df_unwpp_raw['Type']=='Country/Area'].rename(
-              columns={'Region, subregion, country or area *':'Country'}) # make this more flex 
-    
-    cols = df_unwpp.columns
-    
+    for sheet in [0,1]: # sheet 0 has reconstructions up to 2023, sheet 2 has projections
+        df_unwpp_raw = pd.read_excel(filepath_lifeexpectancy, 
+                sheet_name=sheet,
+                skiprows=16) # make this more flex 
+        
+        df_unwpp = df_unwpp_raw[df_unwpp_raw['Type']=='Country/Area'].rename(
+                columns={'Region, subregion, country or area *':'Country'}) # make this more flex 
+        
+        cols = df_unwpp.columns
+        
 
-    # get only life expectancy at age 5
-    idxs = [i for i, col in enumerate(cols) if col in ('Country',  'Year', 5)] #  'ISO3 Alpha-code'
-    # decide whether to keep country name or ISO3 
-    # probably better ISO3 ! 
-    
-    df_unwpp = df_unwpp.iloc[:, idxs].pivot(
-        index='Year',
-        columns='Country',
-        values=5)
-    
-    # years left to live of someone who is 5 years old in that year
-    
-    df_unwpp.index = df_unwpp.index.astype(int)
+        # get only life expectancy at age 5
+        idxs = [i for i, col in enumerate(cols) if col in ('Country',  'Year', 5)] # or: 'ISO3 Alpha-code'
+        # decide whether to keep country name or ISO3 
+        # probably better ISO3 ! 
+        
+        df_unwpp = df_unwpp.iloc[:, idxs].pivot(
+            index='Year',
+            columns='Country',
+            values=5)
+        
+        # years left to live of someone who is 5 years old in that year
+        
+        df_unwpp.index = df_unwpp.index.astype(int)
+
+        df_list.append(df_unwpp)
+
+    df_unwpp = pd.concat(df_list, axis=0).loc[start_birthyear:int(end_birthyear + 5)]
 
     return df_unwpp
 
 
 
 def get_life_expectancies(df_unwpp,
-                         extend=True,
                          start_birthyear=1950,
                          end_birthyear=2025):
     
@@ -718,7 +781,7 @@ def get_life_expectancies(df_unwpp,
     
         return df_life_expectancy_5_extend
     else:
-        return df_life_expectancy_5
+        return df_life_expectancy_5.loc[start_birthyear:end_birthyear ]
 
 
 
@@ -747,8 +810,8 @@ def preprocess_all_country_data(
     end_birthyear=2025, 
 
     dir_population= dir_population,     # gridded pop data 
-    startyear=1950,
-    endyear=2100,
+    #startyear=1950,
+    #endyear=2100,                       # extend past 2100 by repeating pop data! 
     urbanrural=False,                   # NOTE urbanrural not implemented for v2
     bbox = None,
 
@@ -763,6 +826,18 @@ def preprocess_all_country_data(
 
     ):
 
+    # load life expectancy data and clean 
+    df_unwpp = load_unwpp_lifeexpectancy(filepath_lifeexpectancy = filepath_lifeexpectancy) 
+    # go from 'period' to 'cohort' life expectancy
+    df_life_expectancy_5 = get_life_expectancies(df_unwpp,
+                                            start_birthyear=start_birthyear,
+                                            end_birthyear=end_birthyear) 
+
+    # calculate end year as last birth year + maximum life expectancy
+    # cohort sizes are extrapolated, gridded pop data is held constant (check!)
+    endyear = ceil(max(df_life_expectancy_5.values.flatten()) + end_birthyear)
+
+
     # loads raw cohort size data from historical + ssp and cleans to keep only relevant information
     df_cohort_sizes, ages, years = load_cohort_sizes(dir_cohortsizes, ssp=ssp, by_sex=by_sex)
     # interpolates cohort sizes from 5 year to single year and corrects to preserve mean
@@ -775,25 +850,18 @@ def preprocess_all_country_data(
                     # TODO: crop years here too !! 
 
 
-    # load life expectancy data and clean 
-    df_unwpp = load_unwpp_lifeexpectancy(filepath_lifeexpectancy = filepath_lifeexpectancy) 
-    # go from 'period' to 'cohort' life expectancy
-    df_life_expectancy_5 = get_life_expectancies(df_unwpp,
-                                            start_birthyear=start_birthyear,
-                                            end_birthyear=end_birthyear) 
-
 
     # load gridded population data, optional cropping
     da_population = load_population(
-    dir_population= dir_population, 
-    startyear=startyear,
-    endyear=endyear,
-    ssp=ssp,
-    urbanrural=urbanrural,
-    bbox = bbox ,
+                        dir_population= dir_population, 
+                        startyear=start_birthyear,
+                        endyear=endyear, # make sure this fxn works past 2100 ! 
+                        ssp=ssp,
+                        urbanrural=urbanrural,
+                        bbox = bbox ,
 
 
-    )
+                        )
 
     # open countrymasks, optional preprocessing (already done in default input files)
     da_countrymasks = load_countrymasks_fillcoasts(
