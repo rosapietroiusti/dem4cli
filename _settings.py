@@ -70,7 +70,7 @@ elif flags['version'] == 2:
     filepath_countrymask = os.path.join(data_dir, 'country-masks/isipedia-countries/preprocessed/countrymasks_fractional_'+float_to_str(flags['pop_resolution'])+'deg_filledcoasts.nc')
     filepath_lifeexpectancy = os.path.join(data_dir, 'life-expectancy/UN_WPP2024/WPP2024_MORT_F05_1_LIFE_EXPECTANCY_BY_AGE_BOTH_SEXES.xlsx')
     filepath_lookuptable_original = '/data/brussel/vo/000/bvo00012/data/dataset/COMPASS/v2/'+'cross_reference_SSP3_2_to_ISO.xlsx'
-    filepath_lookuptable = os.path.join(data_dir, 'country-masks/lookup_table_dem4cli_v2.csv')
+    filepath_lookuptable = data_dir+'/country-masks/lookup_table_dem4cli_v2.csv'
 
 
 filepath_isimip_countries_meta = os.path.join(data_dir, 'country-masks/isipedia-countries/countryData.json')
