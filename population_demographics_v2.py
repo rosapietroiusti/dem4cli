@@ -305,7 +305,7 @@ def load_cohort_sizes(
         
                 # load data and select only data you want
                 df_unwpp = df_unwpp_raw[df_unwpp_raw['Type']=='Country/Area'].rename( # get rid of World/region/subregion, keep only countries 
-                        columns={'Region, subregion, country or area *':'country', '100+':'100', 'Year':'time', 'age':'ages'}) # make this more flex 
+                        columns={'Region, subregion, country or area *':'country', '100+':100, 'Year':'time', 'age':'ages'}) # make this more flex 
                 cols = df_unwpp.columns
                 idxs = [i for i, col in enumerate(cols) if col in ('country', 'time') or (isinstance(col, int) and 0 <= col < 101)] # cohort size each age each year
                 df_unwpp = df_unwpp.iloc[:, idxs]
@@ -462,7 +462,7 @@ def interpolate_cohortsize_countries(
         if extend_method == 'linear':
 
             # Reindex and forward-fill
-            da_cohort_size = df_cohort_sizes.reindex(time=years_interpn_cohorts, ages=ages_interpn_cohorts, method="ffill").rename('cohort_size')
+            da_cohort_size = df_cohort_sizes.reindex(time=years_interpn_cohorts, method="ffill").rename('cohort_size') # dont interpolate ages here or will change totals
         
         else:
 
@@ -907,9 +907,9 @@ def preprocess_all_country_data(
                             )
 
         # filter all objects before packing
-        select = da_countrymasks.country.isin(df_metadata_filter.index)
-        da_countrymasks = da_countrymasks.sel(country=select)
         df_countries = df_metadata_filter
+        select = da_countrymasks.country.isin(df_countries['abbreviation'])
+        da_countrymasks = da_countrymasks.sel(country=select)
         df_life_expectancy_5 = df_life_expectancy_5[df_countries["name"]]
         name_cohorts = "name" if data_source_cohorts == "UNWPP2024" else "SSP name"
         da_cohort_size = da_cohort_size.sel(country=df_countries[name_cohorts].to_list())
