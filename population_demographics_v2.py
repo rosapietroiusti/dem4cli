@@ -23,6 +23,8 @@ import glob, os, re, sys
 import warnings
 import openpyxl 
 from math import ceil 
+import regionmask 
+from shapely.geometry import box
 
 from _utils import * 
 from _settings import *
@@ -33,73 +35,60 @@ from _settings import *
 # ---------------------------------
 
 
-
+@timeit
 def load_country_metadata(
-    filepath_isimip_countries = filepath_isimip_countries_meta,
     filepath_world_bank = filepath_world_bank_meta, # what year is this from? 
-    keep_names='isimip',
-    keep_stats=False,
-
 ):
     """
-    load country list from isipedia-coutries (country masks metadata files from Perette 2023, https://github.com/ISI-MIP/isipedia-countries)
-    and metadata from worldbank.
-    Keeps only 195 official/observer UN countries. 
+    load country list metadata from worldbank (218 countries) - see what year this is from
 
     Input
-        keep_names (str) what country names to keep, can be 'isimip', 'world_bank', 'both'  
-        filepath_isimip_countries
-        filepath_world_bank
-        keep stats (Bool) from isimip_countries 
+        filepath_world_bank (str) : where is the metadata
     
     Returns
-        df_metadata: table with country name, ISO3 code, country code, region and income group, where available = countries that are both in WB and ISIPEDIA mask
+        df_metadata: table with country name, ISO3 code, country code, region and income group
     
     """
 
-    # open isimip metadata  
-    df_isimip_metadata = pd.read_json(filepath_isimip_countries).replace(-9999, np.nan)
-    # open world bank metadata
-    df_wb_countries = pd.read_excel(filepath_world_bank, sheet_name=0)
-    # merge keep list of countries from isimip and info from world bank
-    df_merge = df_isimip_metadata.merge(df_wb_countries, how='inner',left_on='country_iso3', right_on='Code')
-
-    # keep only some of the info and clean up column names 
-    if keep_names =='isimip':
-        keep_cols = ['country', 'Code', 'country_code','Region', 'Income group']
-        d_rename = {'Code':'abbreviation', 'Region':'region', 'Income group': 'incomegroup'}
-        
-    elif keep_names == 'world_bank':
-        keep_cols =['Economy', 'Code', 'country_code','Region', 'Income group']
-        d_rename={'Economy':'country','Code':'abbreviation', 'Region':'region', 'Income group': 'incomegroup'}
-        
-    elif keep_names == 'both':
-        keep_cols=['country','Economy', 'Code', 'country_code','Region', 'Income group']
-        d_rename={'Economy':'country_wb','Code':'abbreviation', 'Region':'region', 'Income group': 'incomegroup'}     
-
-    if keep_stats == True:
-        keep_cols=keep_cols+list(df_isimip_metadata.columns[3:])
-
-    df_metadata = df_merge[keep_cols].rename(columns=d_rename) 
+    # open world bank categorization: 218 countries total 
+    df_metadata = pd.read_excel(filepath_world_bank_meta, sheet_name=0)
+    # get rid of regions 
+    df_metadata = df_metadata[~df_metadata['Region'].isna()]
+    # rename
+    keep_cols =['Economy', 'Code', 'Region', 'Income group']
+    d_rename={'Economy':'country','Code':'abbreviation', 'Region':'region', 'Income group': 'incomegroup'}
+    df_metadata = df_metadata[keep_cols].rename(columns=d_rename) 
         
     return df_metadata
 
 
+
+
+
+@timeit
 def filter_countries_all_datasets(
+    df_metadata,
     filepath_lookuptable=filepath_lookuptable,      # all data sources
-    df_metadata=None,                               # worldbank and country mask matched already 
-    da_countrymasks = None,
+    countrymask = None,
     worldbank_filter=True, 
     data_source_cohortsizes='UNWPP2024'
 ):
 
-# see slightly different version in S2S !! 
-
-    # lookup table: 249 countries
+    # 1) Lookup table: 249 countries total 
 
     df = pd.read_csv(filepath_lookuptable)
     
-    df = df.merge(pd.DataFrame(da_countrymasks.country.to_pandas().rename('iso3_mask')), how='outer', left_on='ISO alpha-3', right_on='country')
+    # 2) Country mask 
+
+    if isinstance(countrymask, xr.DataArray):
+        # make this conditional ! and filter based on this instead of in previous function... 
+        df = df.merge(pd.DataFrame(da_countrymasks.country.to_pandas().rename('iso3_mask')), how='outer', left_on='ISO alpha-3', right_on='country')
+    elif isinstance(countrymask, gpd.GeoDataFrame):
+        df = df.merge(countrymask, left_on='ISO alpha-3', right_on='abbreviation', how='outer').rename(columns={'abbreviation':'iso3_mask'})
+    else:
+        raise TypeError("countrymask must be a DataArray or GeoDataFrame")
+
+    # 3) Life expectancy and cohort size availability 
 
     if data_source_cohortsizes == 'WCDE':
         df_overlap = df[
@@ -111,41 +100,29 @@ def filter_countries_all_datasets(
                         (df[["SSP name", "WPP name", "iso3_mask"]].notna().all(axis=1)) # availability included in WPP name, the same as life expectancy data
                     ].reset_index(drop=True)
 
+    df_overlap = df_overlap[["SSP name", "WPP name", "iso3_mask", "ISO numeric"]]
+
+    # 4) Worldbank filter (already done for gdf)
+
     if worldbank_filter:
 
-        # only include countries that are also in WB categorization (and have all demographic data): results in 185 world countries 
+        # only include countries that are also in WB categorization (and have all demographic data): results in 185 world countries with frax countrymask, 183 with shapefiles 
         
-        df_metadata_filtered = df_metadata.merge(df_overlap, how='inner', left_on='abbreviation', right_on='ISO alpha-3').reset_index(drop=True)
-        df_metadata_filtered = df_metadata_filtered[['abbreviation', 'region', 'incomegroup', 'country_code', 'SSP name', 'WPP name'   ]].rename(columns={'WPP name':'name' })
+        df_metadata_filtered = df_metadata.merge(df_overlap, how='inner', left_on='abbreviation', right_on='iso3_mask').reset_index(drop=True)
+        df_metadata_filtered = df_metadata_filtered[['abbreviation', 'region', 'incomegroup', 'ISO numeric', 'SSP name', 'WPP name'   ]].rename(columns={'WPP name':'name', 'ISO numeric': 'country_code' })
 
     else: 
 
-        # include all countries that have all demographic data: results in 198 world countries
+        # include all countries that have all demographic data: results in 198 world countries with frax countrymasks, with shapefiles these are already filtered so is still 183
 
-        df_metadata_filtered = df_metadata.merge(df_overlap, how='right', left_on='abbreviation', right_on='ISO alpha-3').reset_index(drop=True)
-
+        df_metadata_filtered = df_metadata.merge(df_overlap, how='right', left_on='abbreviation', right_on='iso3_mask').reset_index(drop=True)
         df_metadata_filtered = df_metadata_filtered[['iso3_mask', 'region', 'incomegroup', 'ISO numeric', 'SSP name', 'WPP name'  ]]
         df_metadata_filtered = df_metadata_filtered.rename(columns={'iso3_mask':'abbreviation', 'ISO numeric': 'country_code', 'WPP name':'name' })
 
-        # maybe rename the WPP data to also use the SSP name? or make 'name' the WPP name? 
 
     return df_metadata_filtered.set_index('name', drop=False)
 
 
-
-
-# COULD DELETE THIS ! Not getting used 
-
-def load_country_stats(
-    filepath_isimip_stats = os.path.join(script_dir, 'data/country-masks/isipedia-countries/countryprofiledata.json')
-                      ):
-    """
-    Load statistics for 195 official/observer UN countries from isipedia-countries. 
-    """
-
-    df_isimip_stats = pd.read_json(filepath_isimip_stats).T.reset_index(drop=True).replace(-9999, np.nan).rename(columns={'iso3':'country_iso3'})
-
-    return df_isimip_stats
 
 
 
@@ -155,6 +132,7 @@ def load_country_stats(
 
 
 
+@timeit
 def load_cohort_sizes( 
     dir_cohortsizes = dir_cohortsizes,
     data_source = flags['cohort_sizes_source'], # 'WCDE' or 'UNWPP2024' 
@@ -333,6 +311,7 @@ def load_cohort_sizes(
 
 
 
+@timeit
 def interpolate_cohortsize_countries(
     df_cohort_sizes,
     cohort_ages,
@@ -477,6 +456,7 @@ def interpolate_cohortsize_countries(
 
 
 
+@timeit
 def load_population(
     dir_population= dir_population, 
     startyear=1950,
@@ -628,15 +608,32 @@ def load_population(
 
 
 
-def load_countrymasks_fillcoasts(
+@timeit
+def load_countrymask(
     filepath_countrymask=filepath_countrymask,
-    preprocess=False, # True if you want to preprocess
-    fillcoast=False, # fill coastal pixels to not lose coastal pops (done in preprocessed files)
+    data_source_countrymask=flags['countrymask'],
+    df_metadata=None,       # make sure this is only WB not also filtered on isipedia! 
+    da_population=None,
+    fillcoast=False, # True if you want to preprocess and fill coastal pixels to not lose coastal pops (done already in preprocessed files)
     fix_smallislands=False, # done in preprocessed input files for 0.5, not for 0.1 - TODO: check if necessary at 0.1 or not ! 
     bbox=None,
     ):
     """
-    Load countrymasks - option to fill coastal pixels so sum of fraction = 1 so coastal populations are not lost. 
+    Load countrymasks - shapefile or fractional mask
+    for fractional mask there is option to fill coastal pixels so sum of fraction = 1 so coastal populations are not lost. 
+
+    Inputs:
+        filepath_countrymask (str)
+        data_source_countrymask (str):      'fractional_mask' or 'shapefile'
+        df_metadata (df):                   df with metadata, NOTE: should only be from world bank
+        da_population (da):                 only necessary for 'shapefile', the population dataarray to make masks
+        fillcoast, fix_smallislands (bool): only for 'fractional_mask' whether to fix coastal pixels so fractions sum to one and fix small island states with errors (only coded for 0.5 deg)
+        bbox (opt, array):                  miny, maxy, minx, maxx - bbox to crop the masks to 
+
+    Returns:
+
+    Note
+    - divide into two different functions? for frax versus shapefile? 
 
     """
 
@@ -647,55 +644,118 @@ def load_countrymasks_fillcoasts(
             da = da.sel(lat=slice(latmin, latmax), lon=slice(lonmin, lonmax))
         else:
             da = da.sel(lat=slice(latmax, latmin), lon=slice(lonmin, lonmax))
-        # compute which countries have all-NaN/0 inside the bbox and drop them 
-        mask = ~((da.isnull() | (da == 0)).all(dim=("lat","lon")))
-        return da.sel(country=mask)
+        if "country" in da.dims:
+            # compute which countries have all-NaN/0 inside the bbox and drop them 
+            mask = ~((da.isnull() | (da == 0)).all(dim=("lat","lon")))
+            return da.sel(country=mask)
+        else:
+            return da
 
-    if not preprocess:
-        # Open data - already preprocessed
-        da_countrymasks = xr.open_dataarray(filepath_countrymask, chunks='auto')
-        if "variable" in da_countrymasks.dims:
-            da_countrymasks = da_countrymasks.isel(variable=0)
+    if data_source_countrymask == 'fractional_mask':
 
+        if not fillcoast:
+            # Open data - already preprocessed
+            da_countrymasks = xr.open_dataarray(filepath_countrymask, chunks='auto')
+            if "variable" in da_countrymasks.dims:
+                da_countrymasks = da_countrymasks.isel(variable=0)
 
-    if preprocess:
-        # Open data 
-        ds=xr.open_dataset(filepath_countrymask, chunks='auto')
-        da_countrymasks = ds.to_array()
-        # clean
-        strings = da_countrymasks['variable'].values
-        cleaned_strings = [s[2:] if s.startswith('m_') else s for s in strings]
-        da_countrymasks['variable'] = cleaned_strings
-        # last variable is 'world', lose it 
-        da_countrymasks = da_countrymasks.isel(variable=slice(0,225))
-
+        # NOTE: could delete this whole section since the data is already preprocessed 
         if fillcoast:
+            # Open data 
+            ds=xr.open_dataset(filepath_countrymask, chunks='auto')
+            da_countrymasks = ds.to_array()
+
+            # clean variable names 
+            strings = da_countrymasks['variable'].values
+            cleaned_strings = [s[2:] if s.startswith('m_') else s for s in strings]
+            da_countrymasks['variable'] = cleaned_strings
+            # last variable is 'world', lose it 
+            da_countrymasks = da_countrymasks.isel(variable=slice(0,225))
+
+            # fill coastal pixels 
             # sum over all countries 
             countrymask_sum = da_countrymasks.sum(dim='variable')
-            # Part 2. Correct for coastal pixels 
-            # where sum of fraction is less than 1, weighted multiplication for sum to equal one
+            # correct for coastal pixels where sum of fraction is less than 1, weighted multiplication for sum to equal one
             da_countrymasks_correct = xr.where(countrymask_sum < 1, da_countrymasks * (1 / countrymask_sum ), da_countrymasks)
             # small area sum = 2, correct for it 
             da_countrymasks_corr = xr.where(da_countrymasks_correct.sum(dim='variable') > 1, da_countrymasks_correct/da_countrymasks_correct.sum(dim='variable'), da_countrymasks_correct)
             da_countrymasks = da_countrymasks_corr
 
-        if fix_smallislands:  
-            # TODO change the lat indexing to be with coords!! doesnt work for 0.1 - hard coded for 0.5 deg 
-            # Fix issue in Singapore pixel, assign fraction from IOSID to SGP 
-            da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='SGP')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')].values
-            da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')] = 0
-            # Fix it also in Mauritius 
-            da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='MUS')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')].values
-            da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')] = 0
+            if fix_smallislands:  
+                # TODO change the lat indexing to be with coords!! doesnt work for 0.1 - hard coded for 0.5 deg 
+                # Fix issue in Singapore pixel, assign fraction from IOSID to SGP 
+                da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='SGP')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')].values
+                da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')] = 0
+                # Fix it also in Mauritius 
+                da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='MUS')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')].values
+                da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')] = 0
+            
+            da_countrymasks = da_countrymasks.rename({'variable':'country'})
+
+        if not bbox:
+            return da_countrymasks, None, None, df_metadata 
+        else: 
+            return cut_to_region(da_countrymasks, bbox), None, None, df_metadata 
+
+
+
+    elif data_source_countrymask == 'shapefile':
+
+        # open shapefile
+        gdf_country_borders_raw = gpd.read_file(filepath_countrymask) # len:255
+        # df_metadata from World  Bank
+        df_metadata['name'] = df_metadata['country']
+        df_countries = df_metadata.set_index('name', drop=False)
+
+
+        #rename from incorrect in shapefile to correct in Worldbank. 
+        d_rename={'KOS':'XKX', 'SDS':'SSD', 'PSX':'PSE'}
+        gdf_country_borders = gdf_country_borders_raw.replace({"ADM0_A3": d_rename})
+
+         # keep only if in both world bank and gdf : 217 countries 
+        gdf_country_borders = gdf_country_borders.merge(
+            df_metadata, 
+            how='inner',
+            left_on='ADM0_A3', 
+            right_on='abbreviation'
+            )
+
+        # if bbox provided, crop the geodataframe and the population data  
+        if bbox:
+            latmin, latmax, lonmin, lonmax = bbox
+            box_crop = box(lonmin, latmin, lonmax, latmax)
+            gdf_country_borders = gpd.clip(gdf_country_borders, box_crop)
+
+            da_population = cut_to_region(da_population, bbox)
+
+        # create regions object and mask object
+        countries_regions = regionmask.from_geopandas(
+            gdf_country_borders, 
+            names='name', 
+            abbrevs="abbreviation", 
+            name="country"
+        )
+        countries_mask = countries_regions.mask(da_population.lon, da_population.lat)
+
+        # remove countries that have zero population (not resolved in mask)
+        for name in df_countries.index.values: 
+            if name in gdf_country_borders['name'].values:
+                # only keep countries that are resolved with mask 
+                if da_population.where(countries_mask==countries_regions.map_keys(name), drop=True).size != 0:
+                    # get mask index and sum up masked population
+                    df_countries.loc[name,'population'] = da_population.where(countries_mask==countries_regions.map_keys(name), drop=True).sum().values
+        # remove countries that have zero population
+        df_countries = df_countries[~df_countries.loc[:, 'population'].isnull()]
         
-        da_countrymasks = da_countrymasks.rename({'variable':'country'})
-
-    if not bbox:
-        return da_countrymasks
-    else: 
-        return cut_to_region(da_countrymasks, bbox)
+        # clean country borders dataframe for return
+        gdf_country_borders = gdf_country_borders.set_index(gdf_country_borders.name
+                                    ).loc[:,['geometry','region', 'ADM0_A3']].rename(columns={'ADM0_A3':'abbreviation'}
+                                    ).reindex(df_countries.index)
 
 
+
+
+        return gdf_country_borders, countries_regions, countries_mask, df_countries # TODO: check if i need df countries here! 
 
 
 
@@ -708,6 +768,7 @@ def load_countrymasks_fillcoasts(
 
 
 
+@timeit
 def load_unwpp_lifeexpectancy(
         filepath_lifeexpectancy = filepath_lifeexpectancy,
         start_birthyear=1950,
@@ -760,6 +821,7 @@ def load_unwpp_lifeexpectancy(
 
 
 
+@timeit
 def get_life_expectancies(df_unwpp,
                          start_birthyear=1950,
                          end_birthyear=2025):
@@ -807,6 +869,7 @@ def get_life_expectancies(df_unwpp,
 # -----------------------------------------------------
 
 
+@timeit
 def preprocess_all_country_data(
 
     filepath_lifeexpectancy = filepath_lifeexpectancy, # life expectancy data
@@ -824,15 +887,20 @@ def preprocess_all_country_data(
     bbox = None,
 
     filepath_countrymask = filepath_countrymask,    # country masks 
-    preprocess=False,                               # NOTE preprocessing is already done in standard input files - TODO: add option to select shapefile or country mask
-    fillcoast=False, 
+    data_source_countrymask = 'shapefile',
+    fillcoast=False,                    # NOTE preprocessing is already done in standard input files - TODO: add option to select shapefile or country mask
     fix_smallislands=False,
     
+    filepath_world_bank = filepath_world_bank_meta, # metadata 
     filepath_lookuptable = filepath_lookuptable,    # country filtering
     filter_countries=True,
     worldbank_filter=True, 
 
     ):
+
+    # metadata from worldbank 
+    df_metadata =  load_country_metadata(filepath_world_bank = filepath_world_bank_meta)
+
 
     # load life expectancy data and clean 
     df_unwpp = load_unwpp_lifeexpectancy(filepath_lifeexpectancy = filepath_lifeexpectancy) 
@@ -840,6 +908,7 @@ def preprocess_all_country_data(
     df_life_expectancy_5 = get_life_expectancies(df_unwpp,
                                             start_birthyear=start_birthyear,
                                             end_birthyear=end_birthyear) 
+
 
     # calculate end year as last birth year + maximum life expectancy
     # cohort sizes are extrapolated, gridded pop data is held constant (check!)
@@ -869,67 +938,56 @@ def preprocess_all_country_data(
                         ssp=ssp,
                         urbanrural=urbanrural,
                         bbox = bbox ,
-
-
                         )
 
     # open countrymasks, optional preprocessing (already done in default input files)
-    da_countrymasks = load_countrymasks_fillcoasts(
-                            filepath_countrymask,
-                            preprocess=preprocess, 
-                            fillcoast=fillcoast, # fill coastal pixels to not lose coastal pops 
-                            fix_smallislands=fix_smallislands, # done in preprocessed input files for 0.5, not for 0.1 
-                            bbox=bbox,
-                            )
+    country_borders, countries_regions, countries_mask, df_metadata = load_countrymask(
+                                        filepath_countrymask,
+                                        data_source_countrymask = data_source_countrymask,
+                                        df_metadata=df_metadata,
+                                        da_population = da_population,
+                                        fillcoast=fillcoast, # fill coastal pixels to not lose coastal pops 
+                                        fix_smallislands=fix_smallislands, # done in preprocessed input files for 0.5, not for 0.1 
+                                        bbox=bbox,
+                                        )
     
 
-
     # filter countries you want to use in analysis 
-    # in all datasets and have world bank income level info = 185 countries , in all datasets but not worldbank = 198 countries
+    # in all datasets and have world bank income level info = 185 countries , in all datasets but not worldbank = 198 countries (fractional mask)
+    # in all datasets, WB and shapefile resolved = 183 countries
 
     if filter_countries:
 
-        # get worldbank metadata
-        df_metadata =  load_country_metadata(
-        filepath_isimip_countries = filepath_isimip_countries_meta,
-        filepath_world_bank = filepath_world_bank_meta, 
-        keep_names='isimip',
-        keep_stats=False,)
-
         # filter countries you want to use in analysis
-        # based on da_countrymask (e.g. if cropped they get dropped), data availability (lookuptable), worldbank categorization (worldbank_filter T/F)
+        # based on countrymask (e.g. if cropped they get dropped), data availability (lookuptable), worldbank categorization (worldbank_filter T/F)
         df_metadata_filter = filter_countries_all_datasets(
                                 df_metadata=df_metadata,
                                 filepath_lookuptable=filepath_lookuptable,
                                 worldbank_filter=worldbank_filter, # T = 185 countries, F = 198 countries
-                                da_countrymasks = da_countrymasks,
+                                countrymask = country_borders,
                                 data_source_cohortsizes = data_source_cohorts,
                             )
 
-        # filter all objects before packing
+        # filter objects before packing
         df_countries = df_metadata_filter
-        select = da_countrymasks.country.isin(df_countries['abbreviation'])
-        da_countrymasks = da_countrymasks.sel(country=select)
+        if isinstance(country_borders, xr.DataArray): # the gdf should already be filtered with the same countries 
+            select = country_borders.country.isin(df_countries['abbreviation'])
+            country_borders = country_borders.sel(country=select)
         df_life_expectancy_5 = df_life_expectancy_5[df_countries["name"]]
         name_cohorts = "name" if data_source_cohorts == "UNWPP2024" else "SSP name"
         da_cohort_size = da_cohort_size.sel(country=df_countries[name_cohorts].to_list())
         
 
-        # TODO: harmonize the country naming in the objects? e.g. use only the ISO3 abbreviation? rename! See with compatibility later 
-
     # pack country information
     d_countries = {
         'info_pop': df_countries,
-        'borders': da_countrymasks,     # NOTE: this is now a dataarray not geodf borders !! adapt later fxns
+        'borders': country_borders,     
         'population_map': da_population,
         'birth_years': None,
         'life_expectancy_5': df_life_expectancy_5, 
         'cohort_size': da_cohort_size,
-        'mask': (None, None),                  # NOTE: is this necessary?
+        'mask': (countries_regions,countries_mask),                  
     }
-
-
-    # TODO: see if Amaury needs other objects I didn't include in d_countries 
 
 
     return d_countries

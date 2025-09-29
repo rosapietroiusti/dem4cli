@@ -43,6 +43,11 @@ flags['cohort_sizes_source'] = 'UNWPP2024'
                         # 'UNWPP2024'
                         # 'WCDE' (these are SSPs)
 
+
+flags['countrymask'] = 'shapefile' 
+                        # 'shapefile' 
+                        # 'fractional_mask' (not fully implemented Lexp) - TO DEVELOP
+
 script_dir = os.path.abspath( os.path.dirname( __file__ ) )
 data_dir = os.path.join(script_dir, 'data')
 
@@ -67,7 +72,11 @@ elif flags['version'] == 2:
         dir_cohortsizes = os.path.join(data_dir, 'cohort-sizes/UN_WPP2024')
     elif flags['cohort_sizes_source'] == 'WCDE':
         dir_cohortsizes = os.path.join(data_dir, 'cohort-sizes/WCDE_v3.2.beta')
-    filepath_countrymask = os.path.join(data_dir, 'country-masks/isipedia-countries/preprocessed/countrymasks_fractional_'+float_to_str(flags['pop_resolution'])+'deg_filledcoasts.nc')
+
+    if flags['countrymask'] =='shapefile':
+        filepath_countrymask = os.path.join(data_dir, 'country-masks/natural_earth/Cultural_10m/Countries/ne_10m_admin_0_countries.shp') # TODO: copy this here and implement this flag! 
+    else:
+        filepath_countrymask = os.path.join(data_dir, 'country-masks/isipedia-countries/preprocessed/countrymasks_fractional_'+float_to_str(flags['pop_resolution'] )+'deg_filledcoasts.nc')
     filepath_lifeexpectancy = os.path.join(data_dir, 'life-expectancy/UN_WPP2024/WPP2024_MORT_F05_1_LIFE_EXPECTANCY_BY_AGE_BOTH_SEXES.xlsx')
     filepath_lookuptable_original = '/data/brussel/vo/000/bvo00012/data/dataset/COMPASS/v2/'+'cross_reference_SSP3_2_to_ISO.xlsx'
     filepath_lookuptable = data_dir+'/country-masks/lookup_table_dem4cli_v2.csv'
