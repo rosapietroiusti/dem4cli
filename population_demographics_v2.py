@@ -56,7 +56,7 @@ def load_country_metadata(
     df_metadata = df_metadata[~df_metadata['Region'].isna()]
     # rename
     keep_cols =['Economy', 'Code', 'Region', 'Income group']
-    d_rename={'Economy':'country','Code':'abbreviation', 'Region':'region', 'Income group': 'incomegroup'}
+    d_rename={'Economy':'country','Code':'abbreviation', 'Region':'region', 'Income group': 'incomegroup'} # could call this country_wb ? or name_wb? 
     df_metadata = df_metadata[keep_cols].rename(columns=d_rename) 
         
     return df_metadata
@@ -88,6 +88,7 @@ def filter_countries_all_datasets(
     else:
         raise TypeError("countrymask must be a DataArray or GeoDataFrame")
 
+        
     # 3) Life expectancy and cohort size availability 
 
     if data_source_cohortsizes == 'WCDE':
@@ -102,6 +103,7 @@ def filter_countries_all_datasets(
 
     df_overlap = df_overlap[["SSP name", "WPP name", "iso3_mask", "ISO numeric"]]
 
+
     # 4) Worldbank filter (already done for gdf)
 
     if worldbank_filter:
@@ -109,18 +111,18 @@ def filter_countries_all_datasets(
         # only include countries that are also in WB categorization (and have all demographic data): results in 185 world countries with frax countrymask, 183 with shapefiles 
         
         df_metadata_filtered = df_metadata.merge(df_overlap, how='inner', left_on='abbreviation', right_on='iso3_mask').reset_index(drop=True)
-        df_metadata_filtered = df_metadata_filtered[['abbreviation', 'region', 'incomegroup', 'ISO numeric', 'SSP name', 'WPP name'   ]].rename(columns={'WPP name':'name', 'ISO numeric': 'country_code' })
+        df_metadata_filtered = df_metadata_filtered[['abbreviation', 'region', 'incomegroup', 'ISO numeric', 'SSP name', 'WPP name', 'name'   ]].rename(columns={ 'ISO numeric': 'country_code' })
 
     else: 
 
         # include all countries that have all demographic data: results in 198 world countries with frax countrymasks, with shapefiles these are already filtered so is still 183
 
         df_metadata_filtered = df_metadata.merge(df_overlap, how='right', left_on='abbreviation', right_on='iso3_mask').reset_index(drop=True)
-        df_metadata_filtered = df_metadata_filtered[['iso3_mask', 'region', 'incomegroup', 'ISO numeric', 'SSP name', 'WPP name'  ]]
-        df_metadata_filtered = df_metadata_filtered.rename(columns={'iso3_mask':'abbreviation', 'ISO numeric': 'country_code', 'WPP name':'name' })
+        df_metadata_filtered = df_metadata_filtered[['iso3_mask', 'region', 'incomegroup', 'ISO numeric', 'SSP name', 'WPP name', 'name'  ]]
+        df_metadata_filtered = df_metadata_filtered.rename(columns={'iso3_mask':'abbreviation', 'ISO numeric': 'country_code' })
 
 
-    return df_metadata_filtered.set_index('name', drop=False)
+    return df_metadata_filtered.set_index('name', drop=True)
 
 
 
@@ -704,8 +706,8 @@ def load_countrymask(
         # open shapefile
         gdf_country_borders_raw = gpd.read_file(filepath_countrymask) # len:255
         # df_metadata from World  Bank
-        df_metadata['name'] = df_metadata['country']
-        df_countries = df_metadata.set_index('name', drop=False)
+        df_metadata['name'] = df_metadata['country'] # world bank name 
+        df_countries = df_metadata.set_index('name', drop=True)
 
 
         #rename from incorrect in shapefile to correct in Worldbank. 
@@ -852,14 +854,6 @@ def get_life_expectancies(df_unwpp,
         return df_life_expectancy_5_extend
     else:
         return df_life_expectancy_5.loc[start_birthyear:end_birthyear ]
-
-
-
-
-
-
-
-
 
 
 
