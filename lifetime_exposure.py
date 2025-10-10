@@ -26,22 +26,29 @@ import openpyxl
 script_dir = os.path.abspath( os.path.dirname( __file__ ) )
 
 
+
+def calc_gmst_per_model():
+
+    # using Pangeo 
+
+    pass
+
+
 def load_climate_data(
     extremes, # e.g. "FWI95d"
     model_names, 
     climatedata_dir = None, # structure should be 
     scenarios = None,
-    df_GMT_strj = None,
+    df_GMT_strj = None, # add also others!
+    smoothing=True,
     rolling_window=21,
     model_gmst_dir = None,
-    gmt_mapping_method = 'year-to-year' # 
+    gmt_mapping_method = 'year-to-year', 
     ): 
 
 
     """ work in progress !!!! """
 
-    def load_gmst_per_model():
-        pass
 
 
 
@@ -68,11 +75,11 @@ def load_climate_data(
                 filepath = glob.glob(os.path.join(climatedata_dir, scenario, model, f'*{model}*{extreme}.nc'))[0]
                 print(f'Loading {filepath}')
             
-                # load rcp data (AFA: Area Fraction Affected) - and manually add correct years
-                da_ssp = xr.open_dataarray(filepath)
+                # load data: annual count of exceedances of threshold (already preprocessed)
+                da_rcp = xr.open_dataarray(filepath)
 
                 # save metadata
-                d_isimip_meta[i] = {
+                d_climate_data_meta[i] = {
                     'extreme': extreme,
                     'model': model,
                     'scenario': scenario,
@@ -84,6 +91,9 @@ def load_climate_data(
 
 
                 # ROSA edited until here !! 
+
+
+
 
                 # load GMT for rcp and historical period - note that these data are in different files
                 if d_isimip_meta[i]['gcm'] == 'hadgem2-es': # .upper() method doesn't work for HadGEM2-ES on linux server (only Windows works here)
@@ -111,7 +121,7 @@ def load_climate_data(
                     header=None).rename(columns={0:'year',1:'tas'}).set_index('year')
 
                 # concatenate historical and future data
-                da_AFA = xr.concat([da_AFA_his,da_AFA_rcp], dim='time')
+                da_AFA = xr.concat([da_hist,da_rcp], dim='time')
                 df_GMT = pd.concat([GMT_his,GMT_fut])
 
                 # convert GMT from absolute values to anomalies - use data from pic until 1861 and from his from then onwards

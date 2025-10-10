@@ -89,7 +89,7 @@ filepath_world_bank_meta = os.path.join(data_dir, 'income-groups/world_bank/CLAS
 # settings for GMT mapping / stylized trajectory creation
 dir_temperature_trajectories = os.path.join(data_dir, 'temperature-trajectories') 
 GMT_inc = 0.1
-scen_thresholds = {
+scen_thresholds = { # peak warming between these values
     '3.0': [2.9,3.0],
     'NDC': [2.35,2.4], # this is not 2.7 it's 2.4 ? Update value? 
     '2.0': [1.95,2.0],

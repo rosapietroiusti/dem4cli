@@ -8,7 +8,7 @@ To do
 - add data for representative scenarios
 
 """
-
+#%%
 
 import numpy as np
 import xarray as xr
@@ -22,9 +22,9 @@ import os
 from copy import deepcopy as cp
 
 
-from settings import * 
+from _settings import * 
 
-
+#%%
 
 def ar6_scen_grab(
     scens,
@@ -36,14 +36,19 @@ def ar6_scen_grab(
     Input:
         scens (dict):               defined in settings.py, thresholds to define representative scenarios filtered from AR6 explorer
                                               as 1.5, 2, NDCs, 3, 4 degrees
-        df_GMT_all (df):                      all the AR6 pathways 
+        df_GMT_all (df):                      all the AR6 pathways (903 pathways)
 
     Returns:
-        df_GMT_lb, df_GMT_15, df_GMT_20, df_GMT_NDC, df_GMT_30, df_GMT_40 (dfs):    representative pathways for
-                                                                                    lower bound, 1.5 degree, 2 degree, NDCs, 3 degrees, 4 degrees (in 2100)
+        df_GMT_lb, df_GMT_15, df_GMT_20, df_GMT_NDC, df_GMT_30, df_GMT_40 (dfs):    representative pathways for lower bound, 1.5 degree, 2 degree, NDCs, 3 degrees, upper bound (~ 4 degrees)
+                                                                                    lower bound is defined as being the scenario that is the coldest scenario on more years than any other scenario, 
+                                                                                    the upper bound (~4 deg in 2100) is defined as the scenario that is hottest on more years,
+                                                                                    1.5,2,3 deg are defined based on peak warming, i.e. the 1.5 scenario has peak warming held within the bounds 
+                                                                                    defined in 'scens' 
+                                                                                    All of these these are raw scenarios filtered from the database, not interpolated yet. 
 
     Notes:
         - NDCs fixed at 2.4 in settings.py - update this value? 
+        - 1.5 refers to peak temperature, it is actually a 1.3 degree scenario in 2100
                                                                                     
     """
     
@@ -76,7 +81,7 @@ def ar6_scen_grab(
         maxes.columns = df_GMT_30[df_GMT_30.columns[dfbools.all()]].columns
         df_GMT_30 = df_GMT_30[df_GMT_30.columns[dfbools.all()]].loc[:,maxes.sum(axis=0).idxmax()]
         
-    # third line, NDC 
+    # third line, NDC, between the bounds defined in scens 
     df_GMT_NDC = df_GMT_all[
         df_GMT_all.columns[(df_GMT_all.max(axis=0)<scens['NDC'][1])&(df_GMT_all.max(axis=0)>scens['NDC'][0])]
     ]
@@ -95,7 +100,7 @@ def ar6_scen_grab(
         maxes.columns = df_GMT_NDC[df_GMT_NDC.columns[dfbools.all()]].columns
         df_GMT_NDC = df_GMT_NDC[df_GMT_NDC.columns[dfbools.all()]].loc[:,maxes.sum(axis=0).idxmax()]
 
-    # 2 degree scen
+    # 2 degree scen - peak warming is close to 2 degrees
     df_GMT_20 = df_GMT_all[
         df_GMT_all.columns[(df_GMT_all.max(axis=0)<scens['2.0'][1])&(df_GMT_all.max(axis=0)>scens['2.0'][0])]
     ]
@@ -114,7 +119,7 @@ def ar6_scen_grab(
         maxes.columns = df_GMT_20[df_GMT_20.columns[dfbools.all()]].columns
         df_GMT_20 = df_GMT_20[df_GMT_20.columns[dfbools.all()]].loc[:,maxes.sum(axis=0).idxmax()]    
 
-    # 1.5 degree scen
+    # 1.5 degree scen - peak warming is close to 1.5 degrees
     df_GMT_15 = df_GMT_all[
         df_GMT_all.columns[(df_GMT_all.max(axis=0)<scens['1.5'][1])&(df_GMT_all.max(axis=0)>scens['1.5'][0])]
     ]
@@ -168,18 +173,84 @@ def load_GMT(
         filepaths embedded in function 
 
     Returns 
-        df_GMT_15, df_GMT_20, df_GMT_NDC, df_GMT_OS, df_GMT_noOS, ds_GMT_STS, df_GMT_strj (dfs) :   stylized trajectories
-                                                                                                    note that OS, noOS and NDC might be outdated? OS and noOS come from Wim's original code and NDC hits 2.4
+        df_GMT_15, df_GMT_20, df_GMT_NDC, df_GMT_OS, df_GMT_noOS, ds_GMT_STS, df_GMT_strj (dfs) :   stylized trajectories. OS and noOS come from Wim's original code, NDC hits ~2.4 in 2100 (defined in settings)
+                                                                                                    All are extended until year_end based on gmt_extend_method, except OS and noOS where the value in 2100 is held constant
 
     Notes
-        - df_GMT_OS, df_GMT_noOS, ds_GMT_STS now inconsistent with new method for post 2100 extension( 10 yrmean) - delete them? keep only 15, 20, strj? 
-        - and document better how they are derived
         - original df_GMT_SR15 used only to get historical 1960-1999
         - can still clean this up a bit
     """
 
-    flags['gmt_extend'] = gmt_extend_method
+    def extend_gmt_to_year_range(df, year_start=year_start, year_end=year_end, gmt_extend_method=gmt_extend_method):
+        """
+        Extend a GMT time series (Series or DataFrame) to a given year range.
+        
+        Handles both backward and forward extension using specified method.
+        
+        Parameters
+        ----------
+        df : pd.Series or pd.DataFrame
+            Input data indexed by year.
+        year_start : int, optional
+            Earliest year to extend to (fills backward if needed).
+        year_end : int, optional
+            Latest year to extend to (fills forward if needed).
+        gmt_extend_method : {'10yrmean', 'lastyear', '10yrtrend'}, optional
+            Method for forward extension beyond the last available year.
+            Note: OS and noOS are always extended with 'lastyear' where this year is taken from 2100
+        
+        Returns
+        -------
+        pd.DataFrame
+            Extended dataset over [year_start, year_end].
+        """
+        # --- Ensure DataFrame ---
+        if isinstance(df, pd.Series):
+            df = df.to_frame()
+            df.columns = [f"{df.loc[2100].values[0]:.1f}"] if 2100 in df.index else ["value"] # [str(round(df.loc[2100].values[0], 2))] if 2100 in df.index else ["value"]
 
+        df = df.copy()
+        df.index = df.index.astype(int)
+        
+        min_year, max_year = int(np.nanmin(df.index)), int(np.nanmax(df.index))
+
+        # --- Backward extension ---
+        if year_start is not None and min_year > year_start:
+            first_10y_mean = df.iloc[:10, :].mean()
+            for year in range(year_start, min_year):
+                df.loc[year] = first_10y_mean
+        
+        df = df.sort_index()
+
+        # --- Forward extension ---
+        if year_end is not None and max_year < year_end:
+            if gmt_extend_method == "10yrmean":
+                last_10y_mean = df.iloc[-10:, :].mean()
+                for year in range(max_year + 1, year_end + 1):
+                    df.loc[year] = last_10y_mean
+
+            elif gmt_extend_method == "lastyear":
+                last_year_vals = df.iloc[-1, :]
+                for year in range(max_year + 1, year_end + 1):
+                    df.loc[year] = last_year_vals
+
+            elif gmt_extend_method == "10yrtrend":
+                yrs = np.arange(max_year - 9, max_year + 1)
+                trends = {col: np.polyfit(yrs, df.loc[yrs, col].astype(float), 1) for col in df.columns}
+                for year in range(max_year + 1, year_end + 1):
+                    df.loc[year] = {col: np.polyval(trends[col], year) for col in df.columns}
+
+        # --- Sort index and restrict range ---
+        df = df.sort_index()
+        if year_start is not None or year_end is not None:
+            df = df.loc[
+                (df.index >= (year_start if year_start is not None else df.index.min())) &
+                (df.index <= (year_end if year_end is not None else df.index.max()))
+            ]
+
+        return df
+
+#%%
     # ---------------------------------------------------------- #
     # Definition trajectories from SR15                          #
     # This is the original scenarios used in Thiery et al.(2021) #                                      
@@ -222,6 +293,9 @@ def load_GMT(
     df_GMT_noOS.name = None
     df_GMT_noOS.index.name = None
 
+    df_GMT_OS = extend_gmt_to_year_range(df_GMT_OS.loc[:2100],year_start, year_end, gmt_extend_method='lastyear')
+    df_GMT_noOS = extend_gmt_to_year_range(df_GMT_noOS.loc[:2100],year_start,year_end, gmt_extend_method='lastyear')
+#%%
     # ---------------------------------------------------------- #
     # Definition of the Stress Test Scenarios (STS)              #
     # by the SPARCCLE project                                    #
@@ -246,7 +320,7 @@ def load_GMT(
     df_GMT_ar6 = df_GMT_ar6.drop(df_GMT_ar6.index[0])
     df_GMT_ar6 = df_GMT_ar6.dropna(axis=1)
     df_GMT_ar6.index = df_GMT_ar6.index.astype(int)
-    df_hist_all = df_GMT_15.loc[1960:1999]
+    df_hist_all = df_GMT_15.loc[year_start:1999]
     df_hist_all = pd.concat([df_hist_all for i in range(len(df_GMT_ar6.columns))],axis=1)
     df_hist_all.columns = df_GMT_ar6.columns
     df_GMT_ar6 = pd.concat([df_hist_all,df_GMT_ar6],axis=0) # add historical values to additional scenarios
@@ -274,7 +348,7 @@ def load_GMT(
     ind_30 = np.argmin(np.abs(GMT_steps-df_GMT_30.iloc[-1]))
     ind_40 = np.argmin(np.abs(GMT_steps-df_GMT_40.iloc[-1]))
     indices=[ind_lb,ind_15,ind_20,ind_NDC,ind_30,ind_40]
-    year_range=np.arange(1960,2100+1) # ROSA so that extrapolation happens after stylized traj are created
+    year_range=np.arange(year_start,2100+1) # ROSA so that extrapolation happens after stylized traj are created
     n_years = len(year_range)
     trj = np.empty((n_years,n_steps))
     trj.fill(np.nan)
@@ -336,46 +410,14 @@ def load_GMT(
 
     df_GMT_strj = cp(df_GMT_strj_clean)  
 
+
     # ROSA: Do the extrapolation past 2100 here after construction of stylized trajectories 
     # instead of on the original AR6 scenarios - better especially for 10-year trend extension
 
-    def extend_past_2100(df):
-
-        if isinstance(df, pd.Series):
-            df = df.to_frame()
-            df.columns = [str(round(df.loc[2100].values[0], 1))] # name based on rounded value in 2100
-
-        if np.nanmax(df.index) < year_end: 
-            
-            if flags['gmt_extend'] == '10yrmean':
-                # repeat average of last 10 years (i.e. end-9 to end ==> 2090:2099) # ORIGINAL
-                # Rosa: not great, not very plausible
-                GMT_last_10ymean = df.iloc[-10:,:].mean()
-                for year in range(np.nanmax(df.index),year_end+1): 
-                    df = pd.concat([df, pd.DataFrame(GMT_last_10ymean).transpose().rename(index={0:year})]) 
-            
-            elif flags['gmt_extend'] == 'lastyear':
-                # ROSA: modify so the last single year value is repeated, not the last 10 years mean
-                GMT_last_year = df.iloc[-1,:]    
-                for year in range(np.nanmax(df.index),year_end+1): 
-                    df_GMT_last_year = pd.DataFrame(GMT_last_year).transpose()
-                    df = pd.concat([df, df_GMT_last_year.rename(index={df_GMT_last_year.index[0]:year})]) 
-        
-            # ROSA testing: extrapolate last 10 year trend of each scenario
-            elif flags['gmt_extend'] == '10yrtrend': 
-                max_year = df.index.max()
-                yrs = np.arange(max_year - 9, max_year + 1)
-                trend = {s: np.polyfit(yrs, df.loc[yrs, s].astype(float), 1) for s in df.columns}
-                future = {
-                    y: {s: np.polyval(trend[s], y) for s in df.columns}
-                    for y in range(max_year + 1, year_end + 1)
-                }
-                df = pd.concat([df, pd.DataFrame.from_dict(future, orient="index")])
-
-        return df
-
-    df_GMT_strj = extend_past_2100(df_GMT_strj)
-
-    df_GMT_NDC = extend_past_2100(df_GMT_NDC)
+    df_GMT_strj = extend_gmt_to_year_range(df_GMT_strj)
+    df_GMT_NDC = extend_gmt_to_year_range(df_GMT_NDC)
+    df_GMT_15 = extend_gmt_to_year_range(df_GMT_15)
+    df_GMT_20 = extend_gmt_to_year_range(df_GMT_20)
     
+
     return df_GMT_15, df_GMT_20, df_GMT_NDC, df_GMT_OS, df_GMT_noOS, ds_GMT_STS, df_GMT_strj
