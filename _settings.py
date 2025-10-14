@@ -95,3 +95,4 @@ scen_thresholds = { # peak warming between these values
     '2.0': [1.95,2.0],
     '1.5': [1.45, 1.5],
 }
+scenarios = ['historical', 'ssp126', 'ssp245', 'ssp370', 'ssp585']

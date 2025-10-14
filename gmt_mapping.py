@@ -20,9 +20,13 @@ import regionmask
 import glob
 import os
 from copy import deepcopy as cp
-
+import numpy as np
+import dask
+from dask.diagnostics import progress
 
 from _settings import * 
+
+#%%
 
 #%%
 
@@ -66,6 +70,7 @@ def ar6_scen_grab(
         df_GMT_all.columns[(df_GMT_all.max(axis=0)<scens['3.0'][1])&(df_GMT_all.max(axis=0)>scens['3.0'][0])]
     ]  
     # dfbools is new df with bool cells for years where series in df_GMT_30 are below the 4 deg line
+    # check if it remains before the 4 deg line to choose a run that is consistently below 4 deg
     dfbools=pd.concat(
         [df_GMT_30.loc[:,c]<=df_GMT_40.loc[:] for c in df_GMT_30.columns],
         axis=1,
@@ -73,7 +78,7 @@ def ar6_scen_grab(
     if len(df_GMT_30[df_GMT_30.columns[dfbools.all()]].columns) == 0: # if there's no columns fully beneath upper line, grab least overlapping
         minfalsecol = df_GMT_30.columns[dfbools.sum(axis=0).idxmax()]
         df_GMT_30 = df_GMT_30.loc[:,minfalsecol]    
-    else: # otherwise, get column with most max years in subset
+    else: # otherwise ( if there are more than one), get column with most max years in subset i.e. the hottest simulation still within constraint 
         maxes = pd.concat(
             [df_GMT_30.loc[:,c]==df_GMT_30.max(axis=1) for c in df_GMT_30[df_GMT_30.columns[dfbools.all()]].columns],
             axis=1,
@@ -85,6 +90,7 @@ def ar6_scen_grab(
     df_GMT_NDC = df_GMT_all[
         df_GMT_all.columns[(df_GMT_all.max(axis=0)<scens['NDC'][1])&(df_GMT_all.max(axis=0)>scens['NDC'][0])]
     ]
+    # check if it remains before the 3 deg line to choose a run that is consistently below 3 deg
     dfbools=pd.concat(
         [df_GMT_NDC.loc[:,c]<=df_GMT_30.loc[:] for c in df_GMT_NDC.columns],
         axis=1,
@@ -92,7 +98,7 @@ def ar6_scen_grab(
     if len(df_GMT_NDC[df_GMT_NDC.columns[dfbools.all()]].columns) == 0: # if there's no columns fully beneath upper line, grab least overlapping
         minfalsecol = df_GMT_NDC.columns[dfbools.sum(axis=0).idxmax()]
         df_GMT_NDC = df_GMT_NDC.loc[:,minfalsecol]    
-    else: # otherwise, get column with most max years in subset
+    else: # otherwise, get column with most max years in subset (i.e. the hottest simulation that is still below 3 deg and within constraints)
         maxes = pd.concat(
             [df_GMT_NDC.loc[:,c]==df_GMT_NDC.max(axis=1) for c in df_GMT_NDC[df_GMT_NDC.columns[dfbools.all()]].columns],
             axis=1,
@@ -250,7 +256,7 @@ def load_GMT(
 
         return df
 
-#%%
+
     # ---------------------------------------------------------- #
     # Definition trajectories from SR15                          #
     # This is the original scenarios used in Thiery et al.(2021) #                                      
@@ -295,7 +301,7 @@ def load_GMT(
 
     df_GMT_OS = extend_gmt_to_year_range(df_GMT_OS.loc[:2100],year_start, year_end, gmt_extend_method='lastyear')
     df_GMT_noOS = extend_gmt_to_year_range(df_GMT_noOS.loc[:2100],year_start,year_end, gmt_extend_method='lastyear')
-#%%
+
     # ---------------------------------------------------------- #
     # Definition of the Stress Test Scenarios (STS)              #
     # by the SPARCCLE project                                    #
