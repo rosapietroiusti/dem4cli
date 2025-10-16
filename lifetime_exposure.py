@@ -27,174 +27,6 @@ from _settings import *
 script_dir = os.path.abspath( os.path.dirname( __file__ ) )
 
 #%%
-def calc_model_gmst(experiments=scenarios,
-                    GCMs=None,
-                    first_ens_member=True,
-                    startyear=1850,
-                    endyear=2100
-    ):
-    """
-    Calc model GMST from Pangeo
-    Todo: move this big fxn to preprocessing
-    Make just a function that does it for specific model simulations / ensemble members if its not available in preprocessed file 
-    """
-
-    from tqdm.autonotebook import tqdm 
-    import intake
-    import fsspec
-    import intake_esm.cat
-    from collections import defaultdict
-
-    # Monkeypatch the method to use applymap()
-    def _columns_with_iterables(self):
-        if self._df.empty:
-            return set()
-        has_iterables = (
-            self._df.sample(20, replace=True).applymap(type)
-            .isin([list, tuple, set])
-            .any()
-            .to_dict()
-        )
-        return {column for column, check in has_iterables.items() if check}
-
-    def drop_all_bounds(ds):
-        """Drop coordinates like 'time_bounds' from datasets,
-        which can lead to issues when merging."""
-        drop_vars = [vname for vname in ds.coords
-                    if (('_bounds') in vname ) or ('_bnds') in vname]
-        return ds.drop(drop_vars)
-
-    def open_dset(df):
-        """Open datasets from cloud storage and return xarray dataset."""
-        assert len(df) == 1
-        ds = xr.open_zarr(fsspec.get_mapper(df.zstore.values[0]), consolidated=True)
-        return drop_all_bounds(ds)
-
-    def open_delayed(df):
-        """A dask.delayed wrapper around `open_dsets`.
-        Allows us to open many datasets in parallel."""
-        return dask.delayed(open_dset)(df)
-
-    def get_lat_name(ds):
-        """Figure out what is the latitude coordinate for each dataset."""
-        for lat_name in ['lat', 'latitude']:
-            if lat_name in ds.coords:
-                return lat_name
-        raise RuntimeError("Couldn't find a latitude coordinate")
-
-    def global_mean(ds):
-        """Return global mean of a whole dataset."""
-
-        lat = ds[get_lat_name(ds)]
-        weight = np.cos(np.deg2rad(lat))
-        weight /= weight.mean()
-        other_dims = set(ds.dims) - {'time'}
-        return (ds * weight).mean(other_dims,skipna=True)
-
-    intake_esm.cat.ESMCatalogModel.columns_with_iterables = property(_columns_with_iterables)
-
-    # open catalogue from Pangeo 
-    col = intake.open_esm_datastore("https://storage.googleapis.com/cmip6/pangeo-cmip6.json")
-
-    if GCMs:
-        query = dict(
-        experiment_id=experiments,
-        table_id='Amon',            # choose to look at atmospheric variables (A) saved at monthly resolution (mon)               
-        variable_id=['tas'],        # choose to look at near-surface air temperature (tas) as our variable
-        source_id = GCMs
-        )
-    else:
-        query = dict(
-        experiment_id=experiments,
-        table_id='Amon',            # choose to look at atmospheric variables (A) saved at monthly resolution (mon)               
-        variable_id=['tas'],        # choose to look at near-surface air temperature (tas) as our variable
-        )
-
-    col_subset = col.search(require_all_on=["source_id"], **query)
-
-    def get_run_number(member_id):
-        """Extract the numeric part of the r# from a member_id string."""
-        match = re.match(r"r(\d+)", member_id)
-        return int(match.group(1)) if match else float('inf')
-
-    if first_ens_member:
-        col_subset = col.search(require_all_on=["source_id"], **query)
-        df = col_subset.df.copy()
-        # add a temporary numeric column
-        df['run_number'] = df['member_id'].map(get_run_number)
-        # sort by source_id, experiment_id, then numeric run number
-        df = df.sort_values(['source_id', 'experiment_id', 'run_number',"member_id"])
-        # drop the helper column
-        df = df.drop(columns='run_number')
-        # Drop duplicates — keep the first ensemble member per model & experiment
-        df = df.drop_duplicates(subset=["source_id", "experiment_id"], keep="first")
-        # optional: check result
-        print(df.groupby("source_id")[["experiment_id", "member_id"]].nunique())
-        # make metadata object 
-        df_metadata = df.groupby(by=['source_id', 'experiment_id'])["member_id"].agg(lambda x: ', '.join(x)).reset_index()
-        # update catalog with this  
-        col_subset.esmcat._df = df
-        col_subset
-    else:
-        ValueError('function not defined for multiple ensemble members')
-
-        # To do: make this possible or select with a dict ! 
-
-    dsets = defaultdict(dict) 
-
-    for group, df in col_subset.df.groupby(by=['source_id', 'experiment_id',"member_id"]):
-        dsets[group[0]][group[1]] = open_delayed(df)
-
-        # try here to save member_id so you have it for traceability!! 
-        # and try to do this for each member_id and have them saved as a dimension in the ds...
-
-    dsets_ = dask.compute(dict(dsets))[0]
-
-    expt_da = xr.DataArray(expts, dims='experiment_id', name='experiment_id',
-                       coords={'experiment_id': expts})
-
-    dsets_aligned = {}
-
-    for k, v in tqdm(dsets_.items()):
-        print(k)
-        expt_dsets = v.values()
-        if any([d is None for d in expt_dsets]):
-            print(f"Missing experiment for {k}")
-            continue
-        
-        for ds in expt_dsets:
-            ds.coords['year'] = ds.time.dt.year
-            print(ds.experiment_id)
-            print(ds.time.dt.year.values[0],ds.time.dt.year.values[-1])
-            
-        # workaround for
-        # https://github.com/pydata/xarray/issues/2237#issuecomment-620961663
-        dsets_ann_mean = [v[expt].pipe(global_mean)
-                                .swap_dims({'time': 'year'})
-                                .drop('time')
-                                .coarsen(year=12).mean(skipna=True)
-                        for expt in expts]
-        
-        # align everything 
-        dsets_aligned[k] = xr.concat(dsets_ann_mean, join='outer',
-                                    dim=expt_da)
-    
-    with progress.ProgressBar():
-        dsets_aligned_ = dask.compute(dsets_aligned)[0]
-    
-    source_ids = list(dsets_aligned_.keys())
-
-    source_da = xr.DataArray(source_ids, dims='source_id', name='source_id',
-                            coords={'source_id': source_ids})
-
-    big_ds = xr.concat([ds.reset_coords(drop=True)
-                        for ds in dsets_aligned_.values()],
-                        dim=source_da)
-
-    df_gmst_all = big_ds.sel(year=slice(startyear, endyear)).to_dataframe().reset_index()
-
-    return df_gmst_all, df_metadata
-
 
 
 
@@ -223,6 +55,7 @@ def load_climate_data(
     model_names,                # GCMs
     df_GMT_strj,                # stylized trajectories
     GMT_extra_trajectories = None,
+    GMT_extra_trajectories_names = None,
     climatedata_dir = None,     # structure should be : climatedata_dir/scenario/model/'*{model}*{extreme}.nc
     filepath_model_gmst = os.path.join(data_dir, 'gmst-models/gmst_models_1850_2100_fwi.csv'),
     scenarios = None,
@@ -239,9 +72,6 @@ def load_climate_data(
 
 
     """ work in progress !!!! """
-
-#%%
-
 
     print('Processing climate data')
 
@@ -268,6 +98,7 @@ def load_climate_data(
                     'model': model,
                     'scenario': scenario,
                 }
+
 
                 # 2) load climate data: annual count of exceedances of threshold (already preprocessed)
                 filepath = glob.glob(os.path.join(climatedata_dir, scenario, model, f'*{model}*{extreme}.nc'))[0]
@@ -298,7 +129,7 @@ def load_climate_data(
                 df_GMT = df_GMT - df_GMT.loc[gmt_anomaly_baseline_period[0] : gmt_anomaly_baseline_period[1]].mean() + gmt_anomaly_correction
 
 
-                # if needed, repeat mean of last 10 years until entire period of interest is covered
+                # 4) if needed, repeat mean of last 10 years until entire period of interest is covered - NOTE: do you need da_AFA here??? you're not using it in this fxn
                 if da_AFA.time.max() < year_end: 
                     da_AFA_lastyear = da_AFA.isel(time=slice(-10, None)).mean(dim='time').expand_dims(dim='time',axis=0)
                     GMT_lastyear = df_GMT.iloc[-10:,:].mean() # mean of last 10 years to fill time span 
@@ -311,18 +142,49 @@ def load_climate_data(
                 # retain only period of interest
                 da_AFA = da_AFA.sel(time=slice(year_start,year_end))
                 df_GMT = df_GMT.loc[year_start:year_end,:]
-                
+
                 # rolling mean 
                 df_GMT = df_GMT.rolling(window=rolling_window,min_periods=min_periods,center=True).mean()
 
                 # save GMT in metadatadict
                 d_climate_data_meta[i]['GMT'] = df_GMT 
+                
+                
+                # 5) run GMT mapping for stylized trajectories 
 
+                # --------------------------------------------------------- #
+                # Step 1: Compute the minimum absolute difference (distance)
+                # between the ISIMIP GMT trajectory (d_isimip_meta[i]['GMT'])
+                # and each reference GMT trajectory (e.g. 1.5°C, 2.0°C, NDC…).
+                # This tells us "how close" the ISIMIP GMT is to the target GMT.
+                # --------------------------------------------------------- #
 
-                # run GMT mapping for stylized trajectories (repeat above but for dataframe of all trajectories)
+                # --------------------------------------------------------- #
+                # Step 2: Get the indices (years) where the ISIMIP GMT is   #
+                # closest to the reference GMT trajectories.                #
+                # (argmin returns the index of the minimum distance).       #
+                # --------------------------------------------------------- #
 
-                # get ISIMIP GMT indices closest to GMT trajectories        
-                # store GMT maxdiffs and indices in metadatadict
+                # ----------------------------------------------------------- #
+                # Step 3: Store the maximum difference (worst case distance)  #
+                # between ISIMIP GMT and each reference trajectory.           #
+                # This allows checking whether the ISIMIP curve ever deviates #
+                # too much from the reference.                                #
+                # ----------------------------------------------------------- #
+
+                # ------------------------------------------------------------ #
+                # Step 4: Define validity flags (True/False).                  #
+                # A trajectory is considered "valid" if the maximum difference #
+                # never exceeds a chosen threshold (RCP2GMT_maxdiff_threshold) #
+                # ------------------------------------------------------------ #
+
+                # ---------------------------------------------------------------- #
+                # Step 5: Save the indices of the years where the GMT              #
+                # trajectory is closest to each target. This allows later          #
+                # remapping for each trajectory                                    #
+                # ---------------------------------------------------------------- #
+
+                # do this for stylized trajectories
                 d_climate_data_meta[i]['GMT_strj_maxdiff'] = np.empty_like(np.arange(len(df_GMT_strj.columns)))
                 d_climate_data_meta[i]['GMT_strj_valid'] = np.empty_like(np.arange(len(df_GMT_strj.columns)))
                 d_climate_data_meta[i]['ind_RCP2GMT_strj'] = np.empty_like(df_GMT_strj.values)
@@ -336,15 +198,48 @@ def load_climate_data(
                     
                 d_climate_data_meta[i]['ind_RCP2GMT_strj'] = d_climate_data_meta[i]['ind_RCP2GMT_strj'].astype(int)
 
+                
+                # do for any extra trajectories - each one should be a df with a single column (i.e. a single pathway)
+                if GMT_extra_trajectories:
+
+                    if isinstance(GMT_extra_trajectories, str):
+                        GMT_extra_trajectories = [GMT_extra_trajectories]
+
+                    for df_traj, name in zip(GMT_extra_trajectories,GMT_extra_trajectories_names ): 
+                        RCP2GMT_diff = np.min(np.abs(d_climate_data_meta[i]['GMT'].values - df_traj.values.transpose()), axis=0)
+                        ind_RCP2GMT= np.argmin(np.abs(d_climate_data_meta[i]['GMT'].values - df_traj.values.transpose()), axis=0)
+                        d_climate_data_meta[i][f'GMT_{name}_maxdiff'] = np.nanmax(RCP2GMT_diff)
+                        d_climate_data_meta[i][f'GMT_{name}_valid'] = np.nanmax(RCP2GMT_diff) < max_diff_valid
+                        d_climate_data_meta[i][f'ind_RCP2GMT_{name}'] = ind_RCP2GMT
+
 
                 # update counter
                 i += 1
-    
-                # TO DO : ADD ALSO OTHER TRAJECTORIES ! 
-
 
                 # what are you doing with da_AFA here??? why do you need to load the data? if not using 
+                # was getting saved as pickle - could do elsewhere, or output in fxn return ?? 
 
-#%%
     return d_climate_data_meta 
 # %%
+
+
+def calc_lifetime_exposure(
+    d_isimip_meta, 
+    df_countries, 
+    countries_regions, 
+    countries_mask, 
+    da_population, 
+    df_life_expectancy_5,
+    ds_regions,
+    da_cohort_size_regions,
+    flags,
+):
+
+
+    pass
+
+
+    # see convo with ChatGPT!! 
+
+
+    return 

@@ -23,6 +23,7 @@ from copy import deepcopy as cp
 import numpy as np
 import dask
 from dask.diagnostics import progress
+import statsmodels.api as sm
 
 from _settings import * 
 
@@ -164,6 +165,7 @@ def load_GMT(
     year_start,
     year_end,
     gmt_extend_method='10yrtrend',
+    smooth_first_decades=True,
 ):
 
     """
@@ -326,7 +328,24 @@ def load_GMT(
     df_GMT_ar6 = df_GMT_ar6.drop(df_GMT_ar6.index[0])
     df_GMT_ar6 = df_GMT_ar6.dropna(axis=1)
     df_GMT_ar6.index = df_GMT_ar6.index.astype(int)
-    df_hist_all = df_GMT_15.loc[year_start:1999]
+
+    # stitch with same tseries for early decades
+
+    if smooth_first_decades:
+        # option to smooth the first decades, otherwise has more variability than later decades 
+        # 2000 is a hot year in the GMT_15 timeseries so it creates a jump to go only until 1999 with the historical, changed for this 
+
+        # opion 1) rolling mean
+        df_GMT_15 = df_GMT_15.rolling(21,min_periods=1,center=True).mean()
+
+        # option 2) lowess - looks very similar 
+        #frac = np.round( 21 / len(df_GMT_15), 2)
+        #y_smo = sm.nonparametric.lowess(df_GMT_15.values.ravel(), np.arange(len(df_GMT_15)), frac=frac, return_sorted=False) # use loess instead to get smoother endpoints
+        #df_GMT_15 = pd.DataFrame(y_smo, index=df_GMT_15.index)
+        df_hist_all = df_GMT_15.loc[year_start:2016]
+    else:
+        df_hist_all = df_GMT_15.loc[year_start:1999]
+        
     df_hist_all = pd.concat([df_hist_all for i in range(len(df_GMT_ar6.columns))],axis=1)
     df_hist_all.columns = df_GMT_ar6.columns
     df_GMT_ar6 = pd.concat([df_hist_all,df_GMT_ar6],axis=0) # add historical values to additional scenarios
@@ -427,3 +446,180 @@ def load_GMT(
     
 
     return df_GMT_15, df_GMT_20, df_GMT_NDC, df_GMT_OS, df_GMT_noOS, ds_GMT_STS, df_GMT_strj
+
+
+
+#%%
+
+
+def calc_model_gmst(experiments=scenarios,
+                    GCMs=None,
+                    first_ens_member=True,
+                    startyear=1850,
+                    endyear=2100
+    ):
+    """
+    Calc model GMST from Pangeo
+    Todo: move this big fxn to preprocessing
+    Make just a function that does it for specific model simulations / ensemble members if its not available in preprocessed file 
+    """
+
+    from tqdm.autonotebook import tqdm 
+    import intake
+    import fsspec
+    import intake_esm.cat
+    from collections import defaultdict
+
+    # Monkeypatch the method to use applymap()
+    def _columns_with_iterables(self):
+        if self._df.empty:
+            return set()
+        has_iterables = (
+            self._df.sample(20, replace=True).applymap(type)
+            .isin([list, tuple, set])
+            .any()
+            .to_dict()
+        )
+        return {column for column, check in has_iterables.items() if check}
+
+    def drop_all_bounds(ds):
+        """Drop coordinates like 'time_bounds' from datasets,
+        which can lead to issues when merging."""
+        drop_vars = [vname for vname in ds.coords
+                    if (('_bounds') in vname ) or ('_bnds') in vname]
+        return ds.drop(drop_vars)
+
+    def open_dset(df):
+        """Open datasets from cloud storage and return xarray dataset."""
+        assert len(df) == 1
+        ds = xr.open_zarr(fsspec.get_mapper(df.zstore.values[0]), consolidated=True)
+        return drop_all_bounds(ds)
+
+    def open_delayed(df):
+        """A dask.delayed wrapper around `open_dsets`.
+        Allows us to open many datasets in parallel."""
+        return dask.delayed(open_dset)(df)
+
+    def get_lat_name(ds):
+        """Figure out what is the latitude coordinate for each dataset."""
+        for lat_name in ['lat', 'latitude']:
+            if lat_name in ds.coords:
+                return lat_name
+        raise RuntimeError("Couldn't find a latitude coordinate")
+
+    def global_mean(ds):
+        """Return global mean of a whole dataset."""
+
+        lat = ds[get_lat_name(ds)]
+        weight = np.cos(np.deg2rad(lat))
+        weight /= weight.mean()
+        other_dims = set(ds.dims) - {'time'}
+        return (ds * weight).mean(other_dims,skipna=True)
+
+    intake_esm.cat.ESMCatalogModel.columns_with_iterables = property(_columns_with_iterables)
+
+    # open catalogue from Pangeo 
+    col = intake.open_esm_datastore("https://storage.googleapis.com/cmip6/pangeo-cmip6.json")
+
+    if GCMs:
+        query = dict(
+        experiment_id=experiments,
+        table_id='Amon',            # choose to look at atmospheric variables (A) saved at monthly resolution (mon)               
+        variable_id=['tas'],        # choose to look at near-surface air temperature (tas) as our variable
+        source_id = GCMs
+        )
+    else:
+        query = dict(
+        experiment_id=experiments,
+        table_id='Amon',            # choose to look at atmospheric variables (A) saved at monthly resolution (mon)               
+        variable_id=['tas'],        # choose to look at near-surface air temperature (tas) as our variable
+        )
+
+    col_subset = col.search(require_all_on=["source_id"], **query)
+
+    def get_run_number(member_id):
+        """Extract the numeric part of the r# from a member_id string."""
+        match = re.match(r"r(\d+)", member_id)
+        return int(match.group(1)) if match else float('inf')
+
+    if first_ens_member:
+        col_subset = col.search(require_all_on=["source_id"], **query)
+        df = col_subset.df.copy()
+        # add a temporary numeric column
+        df['run_number'] = df['member_id'].map(get_run_number)
+        # sort by source_id, experiment_id, then numeric run number
+        df = df.sort_values(['source_id', 'experiment_id', 'run_number',"member_id"])
+        # drop the helper column
+        df = df.drop(columns='run_number')
+        # Drop duplicates — keep the first ensemble member per model & experiment
+        df = df.drop_duplicates(subset=["source_id", "experiment_id"], keep="first")
+        # optional: check result
+        print(df.groupby("source_id")[["experiment_id", "member_id"]].nunique())
+        # make metadata object 
+        df_metadata = df.groupby(by=['source_id', 'experiment_id'])["member_id"].agg(lambda x: ', '.join(x)).reset_index()
+        # update catalog with this  
+        col_subset.esmcat._df = df
+        col_subset
+    else:
+        ValueError('function not defined for multiple ensemble members')
+
+        # To do: make this possible or select with a dict ! 
+
+    dsets = defaultdict(dict) 
+
+    for group, df in col_subset.df.groupby(by=['source_id', 'experiment_id',"member_id"]):
+        dsets[group[0]][group[1]] = open_delayed(df)
+
+        # try here to save member_id so you have it for traceability!! 
+        # and try to do this for each member_id and have them saved as a dimension in the ds...
+
+    dsets_ = dask.compute(dict(dsets))[0]
+
+    expt_da = xr.DataArray(expts, dims='experiment_id', name='experiment_id',
+                       coords={'experiment_id': expts})
+
+    dsets_aligned = {}
+
+    for k, v in tqdm(dsets_.items()):
+        print(k)
+        expt_dsets = v.values()
+        if any([d is None for d in expt_dsets]):
+            print(f"Missing experiment for {k}")
+            continue
+        
+        for ds in expt_dsets:
+            ds.coords['year'] = ds.time.dt.year
+            print(ds.experiment_id)
+            print(ds.time.dt.year.values[0],ds.time.dt.year.values[-1])
+            
+        # workaround for
+        # https://github.com/pydata/xarray/issues/2237#issuecomment-620961663
+        dsets_ann_mean = [v[expt].pipe(global_mean)
+                                .swap_dims({'time': 'year'})
+                                .drop('time')
+                                .coarsen(year=12).mean(skipna=True)
+                        for expt in expts]
+        
+        # align everything 
+        dsets_aligned[k] = xr.concat(dsets_ann_mean, join='outer',
+                                    dim=expt_da)
+    
+    with progress.ProgressBar():
+        dsets_aligned_ = dask.compute(dsets_aligned)[0]
+    
+    source_ids = list(dsets_aligned_.keys())
+
+    source_da = xr.DataArray(source_ids, dims='source_id', name='source_id',
+                            coords={'source_id': source_ids})
+
+    big_ds = xr.concat([ds.reset_coords(drop=True)
+                        for ds in dsets_aligned_.values()],
+                        dim=source_da)
+
+    df_gmst_all = big_ds.sel(year=slice(startyear, endyear)).to_dataframe().reset_index()
+
+    return df_gmst_all, df_metadata
+
+
+
+
