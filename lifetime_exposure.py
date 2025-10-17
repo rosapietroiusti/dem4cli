@@ -222,6 +222,91 @@ def load_climate_data(
     return d_climate_data_meta 
 # %%
 
+def calc_landfraction_exposed(
+    d_climate_data_meta, 
+    df_countries, 
+    countries_regions, 
+    countries_mask, 
+    GMT_extra_trajectories_names,
+    year_start=1950,
+    year_end=2119,
+    #flags,
+):
+
+    # 1) Build Dataset for regions result
+
+    region_names = np.concatenate([df_countries['region'].dropna().unique(),
+                            df_countries['incomegroup'].dropna().unique(),
+                            ['World']
+    ])
+
+    nregions = len(region_names)
+
+
+    year_range = np.arange(year_start, year_end)
+
+    # Shared shape for all variables
+    shape = (len(d_climate_data_meta), nregions, len(year_range))
+
+    # Build the data_vars dictionary in a loop
+    data_vars = {}
+    var_suffixes = GMT_extra_trajectories_names
+    for suffix in var_suffixes:
+        var_name = f'landfrac_peryear_perregion_{suffix}'
+        data_vars[var_name] = (
+            ['run', 'region', 'time_ind'],
+            np.full(shape, np.nan)
+        )
+
+    # Build the dataset
+    ds_lfe_perregion_perrun = xr.Dataset(
+        data_vars=data_vars,
+        coords={
+            'run': ('run', np.arange(1, len(d_climate_data_meta) + 1)),
+            'region': ('region', np.arange(0, nregions)),
+            'time_ind': ('time_ind', np.arange(0, len(year_range), 1))
+        }
+    )
+
+
+    # 2) Build Dataset for country result
+
+
+    # Shared shape for all variables
+    shape = (
+        len(d_climate_data_meta),
+        len(df_countries['name'].values),
+        len(np.arange(0, len(year_range), 1))
+    )
+
+    # Build the data_vars dictionary in a loop
+    data_vars = {}
+    for suffix in var_suffixes:
+        var_name = f'landfrac_peryear_percountry_{suffix}'
+        data_vars[var_name] = (
+            ['run', 'country', 'time_ind'],
+            np.full(shape, np.nan)
+        )
+
+    # Build the dataset
+    ds_lfe_percountry_perrun = xr.Dataset(
+        data_vars=data_vars,
+        coords={
+            'run': ('run', np.arange(1, len(d_climate_data_meta) + 1)),
+            'country': ('country', df_countries['name'].values),
+            'time_ind': ('time_ind', np.arange(0, len(year_range), 1))
+        }
+    )
+
+    for i in list(d_climate_data_meta.keys()): 
+
+        print('                         🟠 Remapping Simulation {} of {} 🟠\n'.format(i,len(d_climate_data_meta)))
+
+
+    pass
+
+
+    return 
 
 def calc_lifetime_exposure(
     d_isimip_meta, 
