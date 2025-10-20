@@ -220,6 +220,245 @@ def load_climate_data(
                 # was getting saved as pickle - could do elsewhere, or output in fxn return ?? 
 
     return d_climate_data_meta 
+
+
+
+    #%%
+
+def get_countries_of_region(
+    region, 
+    df_countries,
+): 
+
+    # Get list of member countries from region
+    member_countries = df_countries.loc[df_countries['region']==region]['name'].values
+
+    # not region but income group
+    if len(member_countries) == 0: 
+        member_countries = df_countries.loc[df_countries['incomegroup']==region]['name'].values
+
+    # get all countries for the world
+    if region == 'World':
+        member_countries = df_countries['name'].values
+
+    return member_countries 
+
+
+
+#%%
+
+
+
+# def calc_weighted_fldmean(
+#     da, 
+#     countries_mask,
+#     ind_country, 
+#     weights=None,
+#     areaweighted=False
+# ):
+#     def get_lat_name(da):
+#         """Figure out what is the latitude coordinate for each dataset."""
+#         for lat_name in ['lat', 'latitude']:
+#             if lat_name in da.coords:
+#                 return lat_name
+#         raise RuntimeError("Couldn't find a latitude coordinate")
+    
+#     def areaweighted_mean(da):
+#         """Return global mean of a whole dataset."""
+#         lat = da[get_lat_name(da)]
+#         weight = np.cos(np.deg2rad(lat))
+#         weight /= weight.mean()
+#         other_dims = set(da.dims) - {'time'}
+#         return (da * weight).mean(other_dims,skipna=True)
+
+#     # one country provided, easy masking
+#     # only keeps the AFA data for the country under study, for the others a NaN value is attributed
+#     # if more countries are provided, combine the different masks 
+#     if len(ind_country) == 1: 
+
+#         da_masked = da.where(countries_mask == ind_country)
+
+#     elif len(ind_country) > 1:
+        
+#         mask = xr.DataArray(
+#             np.in1d(countries_mask,ind_country).reshape(countries_mask.shape),
+#             dims=countries_mask.dims,
+#             coords=countries_mask.coords,
+#         )
+#         da_masked = da.where(mask)
+
+#     if weights is None and areaweighted is True: 
+
+#         da_weighted_fldmean = areaweighted_mean(da_masked)
+    
+#     if weights is not None:
+#         # weight the AFA of the country under study by the size of its population over time at the grid cell or provide gridcell area file 
+#         # slice to save memory on alignment 
+#         if "time" in weights.dims:
+#             weights = weights.sel(time=da_masked.time)
+#         other_dims = set(da.dims) - {'time'}
+#         da_weighted_fldmean = da_masked.weighted(weights).mean(other_dims,skipna=True)
+
+#     del da_masked
+
+#     return da_weighted_fldmean
+
+
+
+def calc_weighted_fldmean(
+    da, 
+    countries_mask,
+    ind_country, 
+    weights=None,
+    areaweighted=False
+):
+    def get_lat_name(da):
+        """Figure out what is the latitude coordinate for each dataset."""
+        for lat_name in ['lat', 'latitude']:
+            if lat_name in da.coords:
+                return lat_name
+        raise RuntimeError("Couldn't find a latitude coordinate")
+    
+    def weighted_mean(da, weights, areaweighted):
+        """Return weighted mean of dataarray."""
+        if weights is not None:
+            # weight the AFA of the country under study by the size of its population over time at the grid cell or provide gridcell area file 
+            # slice to save memory on alignment 
+            if "time" in weights.dims:
+                weights = weights.sel(time=da_masked.time)
+        elif areaweighted: 
+            lat = da[get_lat_name(da)]
+            weights = np.cos(np.deg2rad(lat))        
+        other_dims = set(da.dims) - {'time'}
+        return da_masked.weighted(weights).mean(other_dims,skipna=True).reset_coords(drop=True)
+
+    # match grids
+    da = da.interp_like(countries_mask, method='linear')
+
+    # only keeps the AFA data for the country under study, for the others a NaN value is attributed
+    #if len(ind_country) == 1: 
+    if np.isscalar(ind_country):
+
+        da_masked = da.where(countries_mask == ind_country)
+    
+    # if more countries are provided, combine the different masks 
+    elif len(ind_country) > 1:
+        
+        mask = countries_mask.isin(ind_country)
+        da_masked = da.where(mask)
+
+    da_weighted_fldmean = weighted_mean(da_masked, weights, areaweighted)
+
+    del da_masked
+
+    return da_weighted_fldmean
+
+
+
+
+#%%
+
+# def load_climate_data_array(climatedata_dir,
+#                     scenario,
+#                     model,
+#                     extreme,
+#                     startyear,
+#                     endyear,
+#                     ):
+
+#     # Load climate data: annual count of exceedances of threshold
+#     # TODO: remove this from load_cliamte_data()
+#     filepath = glob.glob(os.path.join(climatedata_dir, scenario, model, f'*{model}*{extreme}.nc'))[0]
+#     print(f'Loading {filepath}')
+#     da_rcp = xr.open_dataarray(filepath,chunks='auto')
+
+#     #load associated historical variable
+#     filepath = glob.glob(os.path.join(climatedata_dir, 'historical', model, f'*{model}*{extreme}.nc'))[0]
+#     print(f'Loading {filepath}')
+#     da_hist = xr.open_dataarray(filepath,chunks='auto')
+
+#     # concat (AFA = area fraction affected, binary data yes/no affected)
+#     da_AFA = xr.concat([da_hist,da_rcp], dim='time')
+#     da_AFA['time'] = da_AFA.time.dt.year
+
+#     # 4) if needed, repeat mean of last 10 years until entire period of interest is covered - NOTE: do you need da_AFA here??? you're not using it in this fxn
+#     if da_AFA.time.max() < year_end: 
+#         da_AFA_lastyear = da_AFA.isel(time=slice(-10, None)).mean(dim='time').expand_dims(dim='time',axis=0)
+#         for year in range(da_AFA.time.max().values+1,year_end+1): 
+#             da_AFA = xr.concat([da_AFA,da_AFA_lastyear.assign_coords(time = [year])], dim='time')
+            
+#     # retain only period of interest
+#     da_AFA = da_AFA.sel(time=slice(year_start,year_end))
+
+#     return da_AFA
+
+#%%
+
+@timeit
+def load_climate_data_array(climatedata_dir,
+                    scenario,
+                    model,
+                    extreme,
+                    startyear,
+                    endyear,
+                    bbox=None
+                    ):
+    """" Load climate data, concat historical + rcp, clean data. Assumes there is only one variable of interest"""
+
+    # Auxiliary function to slice  dataset to a particular region and time 
+    def cut_to_region_time(da):
+        # rename for compatibility with population objects
+        if 'latitude' in da.coords:
+            da = da.rename({'latitude':'lat', 'longitude':'lon'})
+        # slice time
+        if da.time.dtype == 'datetime64[ns]':
+            da['time'] = da['time'].dt.year
+        else:
+            da['time'] = da['time'].astype(int) + startyear_ssp
+        # cut space
+        if bbox is None:
+            return da.sel(time=slice(startyear, endyear))
+        latmin, latmax, lonmin, lonmax = bbox 
+        if da.lat.values[0] < da.lat.values[-1]: # check if lat is increasing or decreasing
+            return da.sel(
+                lat=slice(latmin, latmax), lon=slice(lonmin, lonmax), time=slice(startyear, endyear)
+                )
+        else:
+            return da.sel(
+                lat=slice(latmax, latmin), lon=slice(lonmin, lonmax), time=slice(startyear, endyear)
+                )
+
+    # TODO: remove this from load_cliamte_data()
+
+    filepath_hist = glob.glob(os.path.join(climatedata_dir, 'historical', model, f'*{model}*{extreme}.nc'))[0]
+    filepath_rcp = glob.glob(os.path.join(climatedata_dir, scenario, model, f'*{model}*{extreme}.nc'))[0]
+    print(f'Loading {filepath_hist}')
+    print(f'Loading {filepath_rcp}')
+    da_AFA = xr.open_mfdataset(
+                [filepath_hist, filepath_rcp],
+                combine='nested',
+                concat_dim='time',
+                decode_coords='all',
+                preprocess=cut_to_region_time,
+            )
+    VAR = list(da_AFA.data_vars)[0] # assumes there is only one variable of interest ! 
+    da_AFA = da_AFA[VAR]
+
+    # 4) if needed, repeat mean of last 10 years until entire period of interest is covered - NOTE: do you need da_AFA here??? you're not using it in this fxn
+    if da_AFA.time.max() < year_end: 
+        da_AFA_lastyear = da_AFA.isel(time=slice(-10, None)).mean(dim='time').expand_dims(dim='time',axis=0)
+        for year in range(da_AFA.time.max().values+1,year_end+1): 
+            da_AFA = xr.concat([da_AFA,da_AFA_lastyear.assign_coords(time = [year])], dim='time')
+
+
+    return da_AFA
+
+
+
+
+
+
+
 # %%
 
 def calc_landfraction_exposed(
@@ -227,30 +466,35 @@ def calc_landfraction_exposed(
     df_countries, 
     countries_regions, 
     countries_mask, 
+    # GMT_strj - TO ADD 
     GMT_extra_trajectories_names,
+    climatedata_dir,
     year_start=1950,
     year_end=2119,
+    bbox=None,
+    areaweights=None,
     #flags,
 ):
 
+
     # 1) Build Dataset for regions result
 
+    # get regions and income groups and 'World' (=all countries)
     region_names = np.concatenate([df_countries['region'].dropna().unique(),
                             df_countries['incomegroup'].dropna().unique(),
-                            ['World']
+                            ['World'] # not sure how useful to keep 'World' if you are using a bbox! 
     ])
 
     nregions = len(region_names)
 
-
-    year_range = np.arange(year_start, year_end)
-
     # Shared shape for all variables
+    year_range = np.arange(year_start, year_end+1)
+
     shape = (len(d_climate_data_meta), nregions, len(year_range))
 
     # Build the data_vars dictionary in a loop
     data_vars = {}
-    var_suffixes = GMT_extra_trajectories_names
+    var_suffixes = ['RCP']+GMT_extra_trajectories_names 
     for suffix in var_suffixes:
         var_name = f'landfrac_peryear_perregion_{suffix}'
         data_vars[var_name] = (
@@ -268,9 +512,7 @@ def calc_landfraction_exposed(
         }
     )
 
-
     # 2) Build Dataset for country result
-
 
     # Shared shape for all variables
     shape = (
@@ -298,15 +540,109 @@ def calc_landfraction_exposed(
         }
     )
 
+    # TODO: add also stylized trajectories ????  GMT strj - just would have different shape!!! 
+
+
     for i in list(d_climate_data_meta.keys()): 
 
         print('                         🟠 Remapping Simulation {} of {} 🟠\n'.format(i,len(d_climate_data_meta)))
+
+        scenario = d_climate_data_meta[i]['scenario']
+        model = d_climate_data_meta[i]['model']
+        extreme = d_climate_data_meta[i]['extreme']
+
+        da_AFA = load_climate_data_array(climatedata_dir,
+                    scenario,
+                    model,
+                    extreme,
+                    startyear,
+                    endyear,
+                    bbox
+                    )
+
+        # loop over warming scenarios 
+        for suffix in var_suffixes:
+
+            # loop over regions
+            for ind_region,region in enumerate(region_names):
+
+                print(f'Computing LFE in {region} for {suffix}')
+
+                countries = get_countries_of_region(region, df_countries)
+
+                ind_country = countries_regions.map_keys(countries)
+
+                if suffix == 'RCP': # calc area-weighted fieldmean for each model year
+
+                    land_frac_perregion = calc_weighted_fldmean(da_AFA,countries_mask,ind_country,weights, areaweighted)
+
+                    ds_lfe_perregion_perrun[f'landfrac_peryear_perregion_{suffix}'].loc[{
+                            'run' : i, 
+                            'region' : ind_region
+                        }] = land_frac_perregion.values
+                
+                else: # remap based on indexes previously computed 
+
+                    ind_RCP = d_climate_data_meta[i][f'ind_RCP2GMT_{suffix}']
+
+                    # extract the relevant subset for this run and region
+                    src = ds_lfe_perregion_perrun['landfrac_peryear_perregion_RCP'].sel(run=i, region=ind_region)
+
+                    # assign remapped 
+                    ds_lfe_perregion_perrun[f'landfrac_peryear_perregion_{suffix}'].loc[dict(run=i, region=ind_region)] = src.isel(time_ind=ind_RCP).values
+
+
+            # loop over countries 
+            for j, country in enumerate(df_countries['name']):
+
+                print(f'Computing LFE in {country} for {suffix}', end='\r')
+
+                # calculate mean per country weighted by area
+                ind_country = countries_regions.map_keys(country)
+                
+                if suffix == 'RCP':
+                    landfrac_percountry = calc_weighted_fldmean(da_AFA,countries_mask,ind_country,weights, areaweighted)
+
+                    ds_lfe_percountry_perrun[f'landfrac_peryear_percountry_{suffix}'].loc[{
+                            'run' : i, 
+                            'country' : country
+                        }] = landfrac_percountry.values
+
+                else: # remap based on indexes previously computed 
+
+                    ind_RCP = d_climate_data_meta[i][f'ind_RCP2GMT_{suffix}']
+
+                    # extract the relevant subset for this run and region
+                    src = ds_lfe_percountry_perrun['landfrac_peryear_percountry_RCP'].sel(run=i, country=country)
+
+                    # assign remapped 
+                    ds_lfe_percountry_perrun[f'landfrac_peryear_percountry_{suffix}'].loc[dict(run=i, country=country)] = src.isel(time_ind=ind_RCP).values
+
+
+
+        # Finish/check the remapping ! 
+
+
+
+        # Do this also for stylized trajectories GMT_strj ! 
+        # add to dataset and calc remapped output
+
+
+
+        # Figure out best way to output region names in this fxn
+
 
 
     pass
 
 
-    return 
+    return ds_lfe_perregion_perrun, ds_lfe_percountry_perrun, region_names
+
+
+
+
+
+
 
 def calc_lifetime_exposure(
     d_isimip_meta, 

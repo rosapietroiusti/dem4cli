@@ -25,6 +25,9 @@ from _utils import *
 
 
 
+
+# put these settings in functions!! as arguments ! 
+
 flags = {}
 
 flags['version'] = 2 
@@ -32,7 +35,7 @@ flags['version'] = 2
                         # v2.0 : new pop data, new cohortsize data, 
 
 
-flags['pop_resolution'] = 0.5 # 0.1 or 0.5 for v2, only 0.5 for v1 
+flags['pop_resolution'] = 0.1 # 0.1 or 0.5 for v2, only 0.5 for v1 
 
 flags['GMT_mapping'] = 'year_to_year'
                         # 'year_to_year' = Wim/Luke method
@@ -96,3 +99,6 @@ scen_thresholds = { # peak warming between these values
     '1.5': [1.45, 1.5],
 }
 scenarios = ['historical', 'ssp126', 'ssp245', 'ssp370', 'ssp585']
+
+
+bbox_europe = [ 31.99,  71.09, -14.96,  34.94]
