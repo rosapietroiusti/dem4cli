@@ -466,7 +466,7 @@ def calc_landfraction_exposed(
     df_countries, 
     countries_regions, 
     countries_mask, 
-    # GMT_strj - TO ADD 
+    # GMT_strj -  TODO
     GMT_extra_trajectories_names,
     climatedata_dir,
     year_start=1950,
@@ -622,18 +622,10 @@ def calc_landfraction_exposed(
 
         # Finish/check the remapping ! 
 
-
-
         # Do this also for stylized trajectories GMT_strj ! 
         # add to dataset and calc remapped output
 
-
-
         # Figure out best way to output region names in this fxn
-
-
-
-    pass
 
 
     return ds_lfe_perregion_perrun, ds_lfe_percountry_perrun, region_names
