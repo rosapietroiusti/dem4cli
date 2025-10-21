@@ -100,19 +100,19 @@ def load_climate_data(
                 }
 
 
-                # 2) load climate data: annual count of exceedances of threshold (already preprocessed)
-                filepath = glob.glob(os.path.join(climatedata_dir, scenario, model, f'*{model}*{extreme}.nc'))[0]
-                print(f'Loading {filepath}')
-                da_rcp = xr.open_dataarray(filepath)
+                # # 2) load climate data: annual count of exceedances of threshold (already preprocessed)
+                # filepath = glob.glob(os.path.join(climatedata_dir, scenario, model, f'*{model}*{extreme}.nc'))[0]
+                # print(f'Loading {filepath}')
+                # da_rcp = xr.open_dataarray(filepath)
 
-                #load associated historical variable
-                filepath = glob.glob(os.path.join(climatedata_dir, 'historical', model, f'*{model}*{extreme}.nc'))[0]
-                print(f'Loading {filepath}')
-                da_hist = xr.open_dataarray(filepath)
+                # #load associated historical variable
+                # filepath = glob.glob(os.path.join(climatedata_dir, 'historical', model, f'*{model}*{extreme}.nc'))[0]
+                # print(f'Loading {filepath}')
+                # da_hist = xr.open_dataarray(filepath)
 
-                # concat (AFA = area fraction affected, binary data yes/no affected)
-                da_AFA = xr.concat([da_hist,da_rcp], dim='time')
-                da_AFA['time'] = da_AFA.time.dt.year
+                # # concat (AFA = area fraction affected, binary data yes/no affected)
+                # da_AFA = xr.concat([da_hist,da_rcp], dim='time')
+                # da_AFA['time'] = da_AFA.time.dt.year
 
 
                 # 3) load GMT 
@@ -130,17 +130,18 @@ def load_climate_data(
 
 
                 # 4) if needed, repeat mean of last 10 years until entire period of interest is covered - NOTE: do you need da_AFA here??? you're not using it in this fxn
-                if da_AFA.time.max() < year_end: 
-                    da_AFA_lastyear = da_AFA.isel(time=slice(-10, None)).mean(dim='time').expand_dims(dim='time',axis=0)
+                #if da_AFA.time.max() < year_end: 
+                if df_GMT.index.max() < year_end: 
+                    #da_AFA_lastyear = da_AFA.isel(time=slice(-10, None)).mean(dim='time').expand_dims(dim='time',axis=0)
                     GMT_lastyear = df_GMT.iloc[-10:,:].mean() # mean of last 10 years to fill time span 
 
-                    for year in range(da_AFA.time.max().values+1,year_end+1): 
-                        da_AFA = xr.concat([da_AFA,da_AFA_lastyear.assign_coords(time = [year])], dim='time')
+                    for year in range(df_GMT.index.max()+1,year_end+1): 
+                        #da_AFA = xr.concat([da_AFA,da_AFA_lastyear.assign_coords(time = [year])], dim='time')
                         if len(df_GMT) < 439: # necessary to avoid this filling from 2100-2113 if GMTs already go to 2299
                             df_GMT = pd.concat([df_GMT,pd.DataFrame(data={'tas':GMT_lastyear['tas']},index=[year])])
 
                 # retain only period of interest
-                da_AFA = da_AFA.sel(time=slice(year_start,year_end))
+                #da_AFA = da_AFA.sel(time=slice(year_start,year_end))
                 df_GMT = df_GMT.loc[year_start:year_end,:]
 
                 # rolling mean 
@@ -399,8 +400,8 @@ def load_climate_data_array(climatedata_dir,
                     scenario,
                     model,
                     extreme,
-                    startyear,
-                    endyear,
+                    year_start,
+                    year_end,
                     bbox=None
                     ):
     """" Load climate data, concat historical + rcp, clean data. Assumes there is only one variable of interest"""
@@ -414,18 +415,19 @@ def load_climate_data_array(climatedata_dir,
         if da.time.dtype == 'datetime64[ns]':
             da['time'] = da['time'].dt.year
         else:
-            da['time'] = da['time'].astype(int) + startyear_ssp
+            #da['time'] = da['time'].astype(int) + startyear_ssp TODO: cehck if this was necessary? 
+            ValueError(f'time undefined for array {da}')
         # cut space
         if bbox is None:
-            return da.sel(time=slice(startyear, endyear))
+            return da.sel(time=slice(year_start, year_end))
         latmin, latmax, lonmin, lonmax = bbox 
         if da.lat.values[0] < da.lat.values[-1]: # check if lat is increasing or decreasing
             return da.sel(
-                lat=slice(latmin, latmax), lon=slice(lonmin, lonmax), time=slice(startyear, endyear)
+                lat=slice(latmin, latmax), lon=slice(lonmin, lonmax), time=slice(year_start, year_end)
                 )
         else:
             return da.sel(
-                lat=slice(latmax, latmin), lon=slice(lonmin, lonmax), time=slice(startyear, endyear)
+                lat=slice(latmax, latmin), lon=slice(lonmin, lonmax), time=slice(year_start, year_end)
                 )
 
     # TODO: remove this from load_cliamte_data()
@@ -461,19 +463,20 @@ def load_climate_data_array(climatedata_dir,
 
 # %%
 
+@timeit
 def calc_landfraction_exposed(
     d_climate_data_meta, 
     df_countries, 
     countries_regions, 
     countries_mask, 
-    # GMT_strj -  TODO
-    GMT_extra_trajectories_names,
     climatedata_dir,
+    GMT_extra_trajectories_names,
+    GMT_labels =  df_GMT_strj.columns,
     year_start=1950,
     year_end=2119,
     bbox=None,
-    areaweights=None,
-    #flags,
+    weights=None,
+    areaweighted=True,
 ):
 
 
@@ -555,18 +558,20 @@ def calc_landfraction_exposed(
                     scenario,
                     model,
                     extreme,
-                    startyear,
-                    endyear,
+                    year_start,
+                    year_end,
                     bbox
                     )
 
         # loop over warming scenarios 
         for suffix in var_suffixes:
 
+            print(f'Computing LFE for {suffix}')
+
             # loop over regions
             for ind_region,region in enumerate(region_names):
 
-                print(f'Computing LFE in {region} for {suffix}')
+                print(f'Computing LFE in {region} for {suffix}', end='\r')
 
                 countries = get_countries_of_region(region, df_countries)
 
@@ -583,13 +588,15 @@ def calc_landfraction_exposed(
                 
                 else: # remap based on indexes previously computed 
 
-                    ind_RCP = d_climate_data_meta[i][f'ind_RCP2GMT_{suffix}']
+                    if d_climate_data_meta[i][f'GMT_{suffix}_valid']: # if valid
 
-                    # extract the relevant subset for this run and region
-                    src = ds_lfe_perregion_perrun['landfrac_peryear_perregion_RCP'].sel(run=i, region=ind_region)
+                        ind_RCP = d_climate_data_meta[i][f'ind_RCP2GMT_{suffix}']
 
-                    # assign remapped 
-                    ds_lfe_perregion_perrun[f'landfrac_peryear_perregion_{suffix}'].loc[dict(run=i, region=ind_region)] = src.isel(time_ind=ind_RCP).values
+                        # extract the relevant subset for this run and region
+                        src = ds_lfe_perregion_perrun['landfrac_peryear_perregion_RCP'].sel(run=i, region=ind_region)
+
+                        # assign remapped 
+                        ds_lfe_perregion_perrun[f'landfrac_peryear_perregion_{suffix}'].loc[dict(run=i, region=ind_region)] = src.isel(time_ind=ind_RCP).values
 
 
             # loop over countries 
@@ -610,22 +617,19 @@ def calc_landfraction_exposed(
 
                 else: # remap based on indexes previously computed 
 
-                    ind_RCP = d_climate_data_meta[i][f'ind_RCP2GMT_{suffix}']
+                    if d_climate_data_meta[i][f'GMT_{suffix}_valid']: # if valid
 
-                    # extract the relevant subset for this run and region
-                    src = ds_lfe_percountry_perrun['landfrac_peryear_percountry_RCP'].sel(run=i, country=country)
+                        ind_RCP = d_climate_data_meta[i][f'ind_RCP2GMT_{suffix}']
 
-                    # assign remapped 
-                    ds_lfe_percountry_perrun[f'landfrac_peryear_percountry_{suffix}'].loc[dict(run=i, country=country)] = src.isel(time_ind=ind_RCP).values
+                        # extract the relevant subset for this run and region
+                        src = ds_lfe_percountry_perrun['landfrac_peryear_percountry_RCP'].sel(run=i, country=country)
+
+                        # assign remapped 
+                        ds_lfe_percountry_perrun[f'landfrac_peryear_percountry_{suffix}'].loc[dict(run=i, country=country)] = src.isel(time_ind=ind_RCP).values
 
 
-
-        # Finish/check the remapping ! 
-
-        # Do this also for stylized trajectories GMT_strj ! 
+        # TODO: Do this also for stylized trajectories GMT_strj ! 
         # add to dataset and calc remapped output
-
-        # Figure out best way to output region names in this fxn
 
 
     return ds_lfe_perregion_perrun, ds_lfe_percountry_perrun, region_names

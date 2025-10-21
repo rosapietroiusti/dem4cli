@@ -161,6 +161,7 @@ def ar6_scen_grab(
 # stylized trajectories                                           #
 # ----------------------------------------------------------------#
 
+@timeit
 def load_GMT(
     year_start,
     year_end,
