@@ -57,7 +57,7 @@ def load_climate_data(
     GMT_extra_trajectories = None,
     GMT_extra_trajectories_names = None,
     climatedata_dir = None,     # structure should be : climatedata_dir/scenario/model/'*{model}*{extreme}.nc
-    filepath_model_gmst = os.path.join(data_dir, 'gmst-models/gmst_models_1850_2100_fwi.csv'),
+    filepath_model_gmst = os.path.join(data_dir, 'gmst-models/gmst_models_1850_2100_fwi.csv'), # TODO: dont make this a default !!! 
     scenarios = None,
     smoothing=True,
     rolling_window=21,
@@ -67,11 +67,43 @@ def load_climate_data(
     year_start=1950,
     year_end = 2119,            # 2025 + max life expectancy
     gmt_mapping_method = 'year-to-year', 
-    max_diff_valid = .5, 
+    max_diff_valid = .2, 
     ): 
 
 
-    """ work in progress !!!! """
+    """ 
+    Loads 'recipe' for GMT-remapping climate models to target GMT trajectories. 
+
+    Takes information on model/experiment/ensemble member-specific GMT timseries. If provided, adjusts this to a baseline period, 
+    and if provided additionally adds a correction (e.g. if you want to adjust to 1985-2014 but still want anomalies expressed 
+    relative to 1850-1900).
+    Takes information on target GMT pathways to emulate from df_GMT_strj and optionally extra scenarios. Smooths with indicated rolling
+    window and matches year-to-year the closest matching year, allowing for a model year to be used more than once. This leads to an 
+    underestimation of natural variability wrt. original simulation, but tests show that at decadal timescale averages are well represented, 
+    making this suitable for lifetime exposure calculations. 
+    Outputs a dictionary with the remapping recipe, including a check of whether any attempted emulation is not valid (i.e. target GMT is too different
+    from original GMT e.g. remapping a too hot scenario with an SSP126) 
+
+
+    
+    Inputs
+
+
+
+
+    Returns
+        d_climate_data_meta (dict):     Dictionary, each item is one model simulation and single extreme. 
+                                        'extreme', 'model', 'scenario' : (str) information on extreme, GCM and experiment of original simulation
+                                        'GMT': (df) dataframe with GMT timeseries of original simulation, if provided adjusted to baseline period/correction
+                                        'GMT_strj_maxdiff'  : max difference target to original GMT in any remapping attempt
+                                        'GMT_strj_valid'    : whether maxdiff is larger than validity threshold and therefore invalid
+                                        'ind_RCP2GMT_strj'  : remapping recipe (indexes)
+                                        'GMT_{}_maxdiff', 'GMT_{}_valid', 'ind_RCP2GMT_{}' : with {} filled by GMT_extra_trajectories_names 
+                                                                                             for all provided GMT stylized trajectories, in the form
+
+
+
+    """
 
     print('Processing climate data')
 
@@ -461,7 +493,7 @@ def load_climate_data_array(climatedata_dir,
 
 
 
-# %%
+
 
 @timeit
 def calc_landfraction_exposed(
@@ -470,14 +502,34 @@ def calc_landfraction_exposed(
     countries_regions, 
     countries_mask, 
     climatedata_dir,
-    GMT_extra_trajectories_names,
-    GMT_labels =  df_GMT_strj.columns,
+    GMT_labels = None , #df_GMT_strj.columns
+    GMT_extra_trajectories_names=None,
     year_start=1950,
     year_end=2119,
     bbox=None,
     weights=None,
     areaweighted=True,
 ):
+    """
+    Calc area-weighted fraction of land affected per country and per region under RCP model years and remapping based on GMT_labels and GMT_extra_trajectories,
+    as defined in d_climate_data_meta. 
+
+    Inputs:
+
+    Returns:
+        ds_lfe_perregion_perrun (ds):       per region, per model year or remapped year, per scenario the area-weighted fraction of region exposed 
+        
+        ds_lfe_percountry_perrun (ds):      per country, per model year or remapped year, per scenario the area-weighted fraction of region exposed 
+        
+        region_names (list):                region names to understand ds_lfe_perregion_perrun
+
+
+    To do:
+    - ideally would be nice to have option to give GMT_strj or extra_trajectories as user wants to do - i.e. not make it necessary to have both
+    tried to implement but was getting fidgety so stopped, and so they can just give you one and its also ok (see in scraps doc)
+
+    - could be better to loop first regions then suffix to not have to reselect src all the time 
+    """
 
 
     # 1) Build Dataset for regions result
@@ -495,9 +547,13 @@ def calc_landfraction_exposed(
 
     shape = (len(d_climate_data_meta), nregions, len(year_range))
 
+    shape_strj = (len(d_climate_data_meta), nregions, len(year_range), len(GMT_labels))
+
     # Build the data_vars dictionary in a loop
-    data_vars = {}
+    
     var_suffixes = ['RCP']+GMT_extra_trajectories_names 
+
+    data_vars = {}
     for suffix in var_suffixes:
         var_name = f'landfrac_peryear_perregion_{suffix}'
         data_vars[var_name] = (
@@ -505,24 +561,31 @@ def calc_landfraction_exposed(
             np.full(shape, np.nan)
         )
 
+    data_vars['landfrac_peryear_perregion_strj'] = (
+            ['run', 'region', 'time_ind', 'GMT'],
+            np.full(shape_strj, np.nan)
+
+    )
+
     # Build the dataset
     ds_lfe_perregion_perrun = xr.Dataset(
         data_vars=data_vars,
         coords={
             'run': ('run', np.arange(1, len(d_climate_data_meta) + 1)),
             'region': ('region', np.arange(0, nregions)),
-            'time_ind': ('time_ind', np.arange(0, len(year_range), 1))
+            'time_ind': ('time_ind', np.arange(0, len(year_range), 1)),
+            'GMT': ('GMT', GMT_labels)
         }
     )
 
-    # 2) Build Dataset for country result
 
-    # Shared shape for all variables
+    # 2) Build Dataset for country result
     shape = (
         len(d_climate_data_meta),
         len(df_countries['name'].values),
-        len(np.arange(0, len(year_range), 1))
+        len(year_range)
     )
+    shape_strj = (len(d_climate_data_meta), len(df_countries['name'].values), len(year_range), len(GMT_labels))
 
     # Build the data_vars dictionary in a loop
     data_vars = {}
@@ -533,17 +596,22 @@ def calc_landfraction_exposed(
             np.full(shape, np.nan)
         )
 
+    data_vars['landfrac_peryear_percountry_strj'] = (
+            ['run', 'country', 'time_ind', 'GMT'],
+            np.full(shape_strj, np.nan)
+
+    )
+
     # Build the dataset
     ds_lfe_percountry_perrun = xr.Dataset(
         data_vars=data_vars,
         coords={
             'run': ('run', np.arange(1, len(d_climate_data_meta) + 1)),
             'country': ('country', df_countries['name'].values),
-            'time_ind': ('time_ind', np.arange(0, len(year_range), 1))
+            'time_ind': ('time_ind', np.arange(0, len(year_range), 1)),
+            'GMT': ('GMT', GMT_labels)
         }
     )
-
-    # TODO: add also stylized trajectories ????  GMT strj - just would have different shape!!! 
 
 
     for i in list(d_climate_data_meta.keys()): 
@@ -563,22 +631,23 @@ def calc_landfraction_exposed(
                     bbox
                     )
 
-        # loop over warming scenarios 
-        for suffix in var_suffixes:
 
-            print(f'Computing LFE for {suffix}')
+        # loop over warming scenarios : RCP (model years), example trajs, stylized trajectories (strj)
+        for suffix in var_suffixes+['strj']:
+
+            print(f'Computing land fraction exposed (LFE) for {suffix} \n')
 
             # loop over regions
-            for ind_region,region in enumerate(region_names):
+            for ind_region,region in enumerate(region_names): # could switch loops of region and suffix so i dont need to reselect the 'src' every time - not sure how much faster it would be? 
 
-                print(f'Computing LFE in {region} for {suffix}', end='\r')
+                print(f'Computing LFE in {region}                 ', end='\r')
 
                 countries = get_countries_of_region(region, df_countries)
 
                 ind_country = countries_regions.map_keys(countries)
 
-                if suffix == 'RCP': # calc area-weighted fieldmean for each model year
-
+                if suffix == 'RCP': 
+                    # calc area-weighted fieldmean for each model year
                     land_frac_perregion = calc_weighted_fldmean(da_AFA,countries_mask,ind_country,weights, areaweighted)
 
                     ds_lfe_perregion_perrun[f'landfrac_peryear_perregion_{suffix}'].loc[{
@@ -586,8 +655,9 @@ def calc_landfraction_exposed(
                             'region' : ind_region
                         }] = land_frac_perregion.values
                 
-                else: # remap based on indexes previously computed 
-
+                elif suffix in var_suffixes: 
+                    # remap based on indexes previously computed 
+                    
                     if d_climate_data_meta[i][f'GMT_{suffix}_valid']: # if valid
 
                         ind_RCP = d_climate_data_meta[i][f'ind_RCP2GMT_{suffix}']
@@ -598,16 +668,36 @@ def calc_landfraction_exposed(
                         # assign remapped 
                         ds_lfe_perregion_perrun[f'landfrac_peryear_perregion_{suffix}'].loc[dict(run=i, region=ind_region)] = src.isel(time_ind=ind_RCP).values
 
+                elif suffix == "strj":
+                    # repeat for the regular interval GMT stylized trajectories
+
+                    for step, GMT in enumerate(GMT_labels):
+
+                        if d_climate_data_meta[i]['GMT_strj_valid'][step]:
+
+                            ind_RCP = d_climate_data_meta[i]['ind_RCP2GMT_strj'][:,step]
+
+                            # extract the relevant subset for this run and region
+                            src = ds_lfe_perregion_perrun['landfrac_peryear_perregion_RCP'].sel(run=i, region=ind_region)
+
+                            ds_lfe_perregion_perrun[f'landfrac_peryear_perregion_{suffix}'].loc[dict(run=i, region=ind_region, GMT=GMT)] = src.isel(time_ind=ind_RCP).values
+
+
+
+
+
+
+
 
             # loop over countries 
             for j, country in enumerate(df_countries['name']):
 
-                print(f'Computing LFE in {country} for {suffix}', end='\r')
+                print(f'Computing LFE in {country}                              ', end='\r')
 
-                # calculate mean per country weighted by area
                 ind_country = countries_regions.map_keys(country)
                 
                 if suffix == 'RCP':
+                    # calculate mean per country weighted by area for each model year
                     landfrac_percountry = calc_weighted_fldmean(da_AFA,countries_mask,ind_country,weights, areaweighted)
 
                     ds_lfe_percountry_perrun[f'landfrac_peryear_percountry_{suffix}'].loc[{
@@ -615,8 +705,8 @@ def calc_landfraction_exposed(
                             'country' : country
                         }] = landfrac_percountry.values
 
-                else: # remap based on indexes previously computed 
-
+                elif suffix in var_suffixes: 
+                    # remap based on indexes previously computed 
                     if d_climate_data_meta[i][f'GMT_{suffix}_valid']: # if valid
 
                         ind_RCP = d_climate_data_meta[i][f'ind_RCP2GMT_{suffix}']
@@ -627,9 +717,21 @@ def calc_landfraction_exposed(
                         # assign remapped 
                         ds_lfe_percountry_perrun[f'landfrac_peryear_percountry_{suffix}'].loc[dict(run=i, country=country)] = src.isel(time_ind=ind_RCP).values
 
+                elif suffix == "strj":
+                    # repeat for the regular interval GMT stylized trajectories
 
-        # TODO: Do this also for stylized trajectories GMT_strj ! 
-        # add to dataset and calc remapped output
+                    for step, GMT in enumerate(GMT_labels):
+
+                        if d_climate_data_meta[i]['GMT_strj_valid'][step]:
+
+                            ind_RCP = d_climate_data_meta[i]['ind_RCP2GMT_strj'][:,step]
+
+                            # extract the relevant subset for this run and region
+                            src = ds_lfe_percountry_perrun['landfrac_peryear_percountry_RCP'].sel(run=i, country=country)
+
+                            ds_lfe_percountry_perrun[f'landfrac_peryear_percountry_{suffix}'].loc[dict(run=i, country=country, GMT=GMT)] = src.isel(time_ind=ind_RCP).values
+
+
 
 
     return ds_lfe_perregion_perrun, ds_lfe_percountry_perrun, region_names
@@ -641,16 +743,106 @@ def calc_landfraction_exposed(
 
 
 def calc_lifetime_exposure(
-    d_isimip_meta, 
+    d_climate_data_meta, 
     df_countries, 
     countries_regions, 
     countries_mask, 
+    climatedata_dir,
     da_population, 
     df_life_expectancy_5,
-    ds_regions,
-    da_cohort_size_regions,
-    flags,
-):
+    #ds_regions,
+    #da_cohort_size_regions,
+    GMT_labels = None , #df_GMT_strj.columns
+    GMT_extra_trajectories_names=None,
+    start_birthyear=1950,
+    end_birthyear=2025,
+    bbox=None,
+)
+
+
+# TODO !!!! 
+
+
+    # 1) Build Dataset for regions result
+
+    # get regions and income groups and 'World' (=all countries)
+    region_names = np.concatenate([df_countries['region'].dropna().unique(),
+                            df_countries['incomegroup'].dropna().unique(),
+                            ['World'] # not sure how useful to keep 'World' if you are using a bbox! 
+    ])
+
+    nregions = len(region_names)
+
+    # Shared shape for all variables
+    birth_years = np.arange(start_birthyear, end_birthyear+1)
+
+    shape = (len(d_climate_data_meta), nregions, len(birth_years))
+
+    shape_strj = (len(d_climate_data_meta), nregions, len(birth_years), len(GMT_labels))
+
+    # Build the data_vars dictionary in a loop
+    
+    var_suffixes = ['RCP']+GMT_extra_trajectories_names 
+
+    data_vars = {}
+    for suffix in var_suffixes:
+        var_name = f'le_perregion_perrun_{suffix}'
+        data_vars[var_name] = (
+            ['run', 'region', 'birth_year'],
+            np.full(shape, np.nan)
+        )
+
+    data_vars['le_perregion_perrun_strj'] = (
+            ['run', 'region', 'birth_year', 'GMT'],
+            np.full(shape_strj, np.nan)
+
+    )
+
+    # Build the dataset
+    ds_le_perregion_perrun = xr.Dataset(
+        data_vars=data_vars,
+        coords={
+            'run': ('run', np.arange(1, len(d_climate_data_meta) + 1)),
+            'region': ('region', np.arange(0, nregions)),
+            'birth_year': ('birth_year', birth_years),
+            'GMT': ('GMT', GMT_labels)
+        }
+    )
+
+    # 2) Build Dataset for country result
+
+    # Shared shape for all variables
+    shape = (
+        len(d_climate_data_meta),
+        len(df_countries['name'].values),
+        len(year_range)
+    )
+
+    # Build the data_vars dictionary in a loop
+    data_vars = {}
+    for suffix in var_suffixes:
+        var_name = f'landfrac_peryear_percountry_{suffix}'
+        data_vars[var_name] = (
+            ['run', 'country', 'time_ind'],
+            np.full(shape, np.nan)
+        )
+
+    data_vars['landfrac_peryear_percountry_strj'] = (
+            ['run', 'region', 'time_ind', 'GMT'],
+            np.full(shape_strj, np.nan)
+
+    )
+
+    # Build the dataset
+    ds_lfe_percountry_perrun = xr.Dataset(
+        data_vars=data_vars,
+        coords={
+            'run': ('run', np.arange(1, len(d_climate_data_meta) + 1)),
+            'country': ('country', df_countries['name'].values),
+            'time_ind': ('time_ind', np.arange(0, len(year_range), 1)),
+            'GMT': ('GMT', GMT_labels)
+        }
+    )
 
 
     pass

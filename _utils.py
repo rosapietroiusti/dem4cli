@@ -1,7 +1,7 @@
 
 import time
 import functools
-
+import statsmodels.api as sm
 
 def float_to_str(val, scale=10, width=2):
     """
@@ -25,3 +25,9 @@ def timeit(func):
         print(f"{func.__name__} took {end - start:.2f} s")
         return result
     return wrapper_timeit
+
+
+
+def detrend(year, data):
+    fit = sm.OLS(data, sm.add_constant(year)).fit()
+    return fit.resid
