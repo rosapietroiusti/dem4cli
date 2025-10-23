@@ -25,7 +25,7 @@ import dask
 from dask.diagnostics import progress
 import statsmodels.api as sm
 
-from _settings import * 
+from ._settings import * 
 
 #%%
 

@@ -22,7 +22,7 @@ import glob, os, re, sys
 import warnings
 import openpyxl 
 
-from _settings import * 
+from ._settings import * 
 
 script_dir = os.path.abspath( os.path.dirname( __file__ ) )
 
@@ -114,6 +114,9 @@ def load_climate_data(
     if isinstance(extremes, str):
         extremes = [extremes]
 
+    # remove historical if provided in list of scenarios
+    scenarios = [s for s in scenarios if s not in ('historical', 'hist')]
+
     # loop over extremes e.g. FWId95
     for extreme in extremes:
 
@@ -132,22 +135,7 @@ def load_climate_data(
                 }
 
 
-                # # 2) load climate data: annual count of exceedances of threshold (already preprocessed)
-                # filepath = glob.glob(os.path.join(climatedata_dir, scenario, model, f'*{model}*{extreme}.nc'))[0]
-                # print(f'Loading {filepath}')
-                # da_rcp = xr.open_dataarray(filepath)
-
-                # #load associated historical variable
-                # filepath = glob.glob(os.path.join(climatedata_dir, 'historical', model, f'*{model}*{extreme}.nc'))[0]
-                # print(f'Loading {filepath}')
-                # da_hist = xr.open_dataarray(filepath)
-
-                # # concat (AFA = area fraction affected, binary data yes/no affected)
-                # da_AFA = xr.concat([da_hist,da_rcp], dim='time')
-                # da_AFA['time'] = da_AFA.time.dt.year
-
-
-                # 3) load GMT 
+                # 2) load GMT 
                 df_GMT = pd.read_csv(filepath_model_gmst,index_col=0)
                 df_GMT['year'] = df_GMT['year'].astype(int)
                 modelname = model if model != 'EC-EARTH' else 'EC-Earth3'
@@ -161,7 +149,7 @@ def load_climate_data(
                 df_GMT = df_GMT - df_GMT.loc[gmt_anomaly_baseline_period[0] : gmt_anomaly_baseline_period[1]].mean() + gmt_anomaly_correction
 
 
-                # 4) if needed, repeat mean of last 10 years until entire period of interest is covered - NOTE: do you need da_AFA here??? you're not using it in this fxn
+                # 3) if needed, repeat mean of last 10 years until entire period of interest is covered - NOTE: do you need da_AFA here??? you're not using it in this fxn
                 #if da_AFA.time.max() < year_end: 
                 if df_GMT.index.max() < year_end: 
                     #da_AFA_lastyear = da_AFA.isel(time=slice(-10, None)).mean(dim='time').expand_dims(dim='time',axis=0)
@@ -183,7 +171,7 @@ def load_climate_data(
                 d_climate_data_meta[i]['GMT'] = df_GMT 
                 
                 
-                # 5) run GMT mapping for stylized trajectories 
+                # 4) run GMT mapping recipe  for stylized trajectories 
 
                 # --------------------------------------------------------- #
                 # Step 1: Compute the minimum absolute difference (distance)
@@ -282,61 +270,6 @@ def get_countries_of_region(
 
 
 
-# def calc_weighted_fldmean(
-#     da, 
-#     countries_mask,
-#     ind_country, 
-#     weights=None,
-#     areaweighted=False
-# ):
-#     def get_lat_name(da):
-#         """Figure out what is the latitude coordinate for each dataset."""
-#         for lat_name in ['lat', 'latitude']:
-#             if lat_name in da.coords:
-#                 return lat_name
-#         raise RuntimeError("Couldn't find a latitude coordinate")
-    
-#     def areaweighted_mean(da):
-#         """Return global mean of a whole dataset."""
-#         lat = da[get_lat_name(da)]
-#         weight = np.cos(np.deg2rad(lat))
-#         weight /= weight.mean()
-#         other_dims = set(da.dims) - {'time'}
-#         return (da * weight).mean(other_dims,skipna=True)
-
-#     # one country provided, easy masking
-#     # only keeps the AFA data for the country under study, for the others a NaN value is attributed
-#     # if more countries are provided, combine the different masks 
-#     if len(ind_country) == 1: 
-
-#         da_masked = da.where(countries_mask == ind_country)
-
-#     elif len(ind_country) > 1:
-        
-#         mask = xr.DataArray(
-#             np.in1d(countries_mask,ind_country).reshape(countries_mask.shape),
-#             dims=countries_mask.dims,
-#             coords=countries_mask.coords,
-#         )
-#         da_masked = da.where(mask)
-
-#     if weights is None and areaweighted is True: 
-
-#         da_weighted_fldmean = areaweighted_mean(da_masked)
-    
-#     if weights is not None:
-#         # weight the AFA of the country under study by the size of its population over time at the grid cell or provide gridcell area file 
-#         # slice to save memory on alignment 
-#         if "time" in weights.dims:
-#             weights = weights.sel(time=da_masked.time)
-#         other_dims = set(da.dims) - {'time'}
-#         da_weighted_fldmean = da_masked.weighted(weights).mean(other_dims,skipna=True)
-
-#     del da_masked
-
-#     return da_weighted_fldmean
-
-
 
 def calc_weighted_fldmean(
     da, 
@@ -389,41 +322,6 @@ def calc_weighted_fldmean(
 
 
 
-#%%
-
-# def load_climate_data_array(climatedata_dir,
-#                     scenario,
-#                     model,
-#                     extreme,
-#                     startyear,
-#                     endyear,
-#                     ):
-
-#     # Load climate data: annual count of exceedances of threshold
-#     # TODO: remove this from load_cliamte_data()
-#     filepath = glob.glob(os.path.join(climatedata_dir, scenario, model, f'*{model}*{extreme}.nc'))[0]
-#     print(f'Loading {filepath}')
-#     da_rcp = xr.open_dataarray(filepath,chunks='auto')
-
-#     #load associated historical variable
-#     filepath = glob.glob(os.path.join(climatedata_dir, 'historical', model, f'*{model}*{extreme}.nc'))[0]
-#     print(f'Loading {filepath}')
-#     da_hist = xr.open_dataarray(filepath,chunks='auto')
-
-#     # concat (AFA = area fraction affected, binary data yes/no affected)
-#     da_AFA = xr.concat([da_hist,da_rcp], dim='time')
-#     da_AFA['time'] = da_AFA.time.dt.year
-
-#     # 4) if needed, repeat mean of last 10 years until entire period of interest is covered - NOTE: do you need da_AFA here??? you're not using it in this fxn
-#     if da_AFA.time.max() < year_end: 
-#         da_AFA_lastyear = da_AFA.isel(time=slice(-10, None)).mean(dim='time').expand_dims(dim='time',axis=0)
-#         for year in range(da_AFA.time.max().values+1,year_end+1): 
-#             da_AFA = xr.concat([da_AFA,da_AFA_lastyear.assign_coords(time = [year])], dim='time')
-            
-#     # retain only period of interest
-#     da_AFA = da_AFA.sel(time=slice(year_start,year_end))
-
-#     return da_AFA
 
 #%%
 
@@ -509,10 +407,15 @@ def calc_landfraction_exposed(
     bbox=None,
     weights=None,
     areaweighted=True,
+    convert_to_binary=False,  # if your data array is number of exceedances per year, if you set this to True you get fraction of land area exposed to at least 1 day
+    convert_to_binary_threshold=0,
 ):
     """
-    Calc area-weighted fraction of land affected per country and per region under RCP model years and remapping based on GMT_labels and GMT_extra_trajectories,
-    as defined in d_climate_data_meta. 
+    Calc area-weighted average of your input hazard dataset per country and per region. Results are given per origina RCP model years and after GMT-remapping 
+    year-to-year based on GMT_labels and GMT_extra_trajectories, with the remapping recipe defined in d_climate_data_meta. 
+
+    Note: if your input data is annual binary (0/1) this will give the fraction of land exposed. If your input data is the number of annual exceedances this will give
+    the average number of days per year the country is experiencing. 
 
     Inputs:
 
@@ -632,6 +535,11 @@ def calc_landfraction_exposed(
                     )
 
 
+        if convert_to_binary:
+            # convert the data array to binary so the result is the fraction of land exposed 
+            da_AFA = (da_AFA > convert_to_binary_threshold).astype(int)
+
+
         # loop over warming scenarios : RCP (model years), example trajs, stylized trajectories (strj)
         for suffix in var_suffixes+['strj']:
 
@@ -739,7 +647,10 @@ def calc_landfraction_exposed(
 
 
 
+#%%
 
+
+# ROSA working on this ! 
 
 
 def calc_lifetime_exposure(
@@ -757,7 +668,7 @@ def calc_lifetime_exposure(
     start_birthyear=1950,
     end_birthyear=2025,
     bbox=None,
-)
+):
 
 
 # TODO !!!! 
@@ -768,12 +679,12 @@ def calc_lifetime_exposure(
     # get regions and income groups and 'World' (=all countries)
     region_names = np.concatenate([df_countries['region'].dropna().unique(),
                             df_countries['incomegroup'].dropna().unique(),
-                            ['World'] # not sure how useful to keep 'World' if you are using a bbox! 
+                            ['World'] # if using a bbox this is all countries in the bbox - rename to all_countries? 
     ])
 
+    # Shared shape for all variables
     nregions = len(region_names)
 
-    # Shared shape for all variables
     birth_years = np.arange(start_birthyear, end_birthyear+1)
 
     shape = (len(d_climate_data_meta), nregions, len(birth_years))

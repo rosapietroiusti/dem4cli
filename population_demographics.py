@@ -25,8 +25,8 @@ from math import ceil
 import regionmask 
 from shapely.geometry import box
 
-from _utils import * 
-from _settings import *
+from ._utils import * 
+from ._settings import *
 
 #%%
 # ---------------------------------
