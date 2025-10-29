@@ -667,12 +667,12 @@ def calc_lifetime_exposure(
     GMT_extra_trajectories_names=None,
     start_birthyear=1950,
     end_birthyear=2025,
+    year_start=1950,
+    year_end=2119,
     bbox=None,
 ):
 
-
 # TODO !!!! 
-
 
     # 1) Build Dataset for regions result
 
@@ -687,9 +687,18 @@ def calc_lifetime_exposure(
 
     birth_years = np.arange(start_birthyear, end_birthyear+1)
 
-    shape = (len(d_climate_data_meta), nregions, len(birth_years))
+    year_range = np.arange(year_start, year_end+1)
 
-    shape_strj = (len(d_climate_data_meta), nregions, len(birth_years), len(GMT_labels))
+    shape = (
+        len(d_climate_data_meta), 
+        nregions, 
+        len(birth_years))
+
+    shape_strj = (
+        len(d_climate_data_meta), 
+        nregions, 
+        len(birth_years), 
+        len(GMT_labels))
 
     # Build the data_vars dictionary in a loop
     
@@ -726,34 +735,99 @@ def calc_lifetime_exposure(
     shape = (
         len(d_climate_data_meta),
         len(df_countries['name'].values),
-        len(year_range)
+        len(birth_years)
     )
+
+    shape_strj = (
+        len(d_climate_data_meta), 
+        len(df_countries['name'].values), 
+        len(birth_years), 
+        len(GMT_labels))
+
 
     # Build the data_vars dictionary in a loop
     data_vars = {}
     for suffix in var_suffixes:
-        var_name = f'landfrac_peryear_percountry_{suffix}'
+        var_name = f'le_percountry_perrun_{suffix}'
         data_vars[var_name] = (
-            ['run', 'country', 'time_ind'],
+            ['run', 'country', 'birth_year'],
             np.full(shape, np.nan)
         )
 
-    data_vars['landfrac_peryear_percountry_strj'] = (
-            ['run', 'region', 'time_ind', 'GMT'],
+    data_vars['le_percountry_perrun_strj'] = (
+            ['run', 'region', 'birth_year', 'GMT'],
             np.full(shape_strj, np.nan)
-
     )
 
     # Build the dataset
-    ds_lfe_percountry_perrun = xr.Dataset(
+    ds_le_percountry_perrun = xr.Dataset(
         data_vars=data_vars,
         coords={
             'run': ('run', np.arange(1, len(d_climate_data_meta) + 1)),
             'country': ('country', df_countries['name'].values),
-            'time_ind': ('time_ind', np.arange(0, len(year_range), 1)),
+            'birth_year': ('birth_year', birth_years),
             'GMT': ('GMT', GMT_labels)
         }
     )
+
+
+    # loop over simulations
+    
+    for i in list(d_climate_data_meta.keys()): 
+
+        print('                         🟠 Remapping Simulation {} of {} 🟠\n'.format(i,len(d_climate_data_meta)))
+
+        scenario = d_climate_data_meta[i]['scenario']
+        model = d_climate_data_meta[i]['model']
+        extreme = d_climate_data_meta[i]['extreme']
+
+        da_AFA = load_climate_data_array(climatedata_dir,
+                    scenario,
+                    model,
+                    extreme,
+                    year_start,
+                    year_end,
+                    bbox
+                    )
+        
+        #---------------------------------------------------------------------#
+        # Computation of the weighted by population field mean of AFA for     # 
+        # each ISIMIP simulations for each country                            #
+        #---------------------------------------------------------------------#
+
+        # initialise dict
+        d_exposure_percountry = {}
+
+        print('⏳ Computing the Population-Weighted Spatial Average of the Exposure for all countries\n')
+
+        # get spatial average
+        for j, country in enumerate(df_countries['name']): 
+
+            # calculate mean per country weighted by population
+            ind_country = countries_regions.map_keys(country)
+
+            # historical + RCP simulations
+            d_exposure_percountry[country] = calc_weighted_fldmean( 
+                da_AFA,
+                countries_mask, 
+                ind_country,
+                weights=da_population, 
+                areaweighted=False
+            )
+                        
+        # Convert dict to dataframe for vectorizing and integrate exposures   
+        # avg population-weighted exposure per country per year
+        frame = {k:v.values for k,v in d_exposure_percountry.items()}
+        df_exposure_percountry = pd.DataFrame(frame,index=year_range)         
+
+        print('🟢 Population-Weighted Spatial Average of the Exposure for all countries Computed')
+
+        # loop over warming scenarios : RCP (model years), example trajs, stylized trajectories (strj)
+        for suffix in var_suffixes+['strj']:
+
+            print(f'Computing land fraction exposed (LFE) for {suffix} \n')
+
+
 
 
     pass

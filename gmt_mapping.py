@@ -25,9 +25,7 @@ import dask
 from dask.diagnostics import progress
 import statsmodels.api as sm
 
-from ._settings import * 
-
-#%%
+from ._settings import *
 
 #%%
 
@@ -449,9 +447,7 @@ def load_GMT(
     return df_GMT_15, df_GMT_20, df_GMT_NDC, df_GMT_OS, df_GMT_noOS, ds_GMT_STS, df_GMT_strj
 
 
-
 #%%
-
 
 def calc_model_gmst(experiments=scenarios,
                     GCMs=None,
