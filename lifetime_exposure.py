@@ -652,7 +652,7 @@ def calc_landfraction_exposed(
 
 # ROSA working on this ! 
 
-
+@timeit
 def calc_lifetime_exposure(
     d_climate_data_meta, 
     df_countries, 
@@ -661,8 +661,7 @@ def calc_lifetime_exposure(
     climatedata_dir,
     da_population, 
     df_life_expectancy_5,
-    #ds_regions,
-    #da_cohort_size_regions,
+    da_cohort_size,
     GMT_labels = None , #df_GMT_strj.columns
     GMT_extra_trajectories_names=None,
     start_birthyear=1950,
@@ -672,7 +671,37 @@ def calc_lifetime_exposure(
     bbox=None,
 ):
 
-# TODO !!!! 
+    def calc_life_exposure(
+        df_exposure,
+        df_life_expectancy,
+        col,
+    ):
+        # initialise birth years 
+        exposure_birthyears_percountry = np.empty(len(df_life_expectancy))
+
+        for i, birth_year in enumerate(df_life_expectancy.index):
+            life_expectancy = df_life_expectancy.loc[birth_year,col] 
+
+            # define death year based on life expectancy
+            death_year = birth_year + np.floor(life_expectancy)
+
+            # integrate exposure over full years lived
+            exposure_birthyears_percountry[i] = df_exposure.loc[birth_year:death_year,col].sum()
+
+            # add exposure during last (partial) year
+            exposure_birthyears_percountry[i] = exposure_birthyears_percountry[i] + \
+                df_exposure.loc[death_year+1,col].sum() * \
+                    (life_expectancy - np.floor(life_expectancy))
+
+        # a series for each column to somehow group into a dataframe
+        exposure_birthyears_percountry = pd.Series(
+            exposure_birthyears_percountry,
+            index=df_life_expectancy.index,
+            name=col,
+        )
+
+        return exposure_birthyears_percountry
+
 
     # 1) Build Dataset for regions result
 
@@ -800,8 +829,10 @@ def calc_lifetime_exposure(
 
         print('⏳ Computing the Population-Weighted Spatial Average of the Exposure for all countries\n')
 
-        # get spatial average
+        # get spatial average per country
         for j, country in enumerate(df_countries['name']): 
+
+            print(f'Computing LFE in {country}                              ', end='\r')
 
             # calculate mean per country weighted by population
             ind_country = countries_regions.map_keys(country)
@@ -820,20 +851,99 @@ def calc_lifetime_exposure(
         frame = {k:v.values for k,v in d_exposure_percountry.items()}
         df_exposure_percountry = pd.DataFrame(frame,index=year_range)         
 
-        print('🟢 Population-Weighted Spatial Average of the Exposure for all countries Computed')
+        # initialise dict
+        d_exposure_perregion = {}
+        d_life_expectancy_perregion = {}
+
+        print('⏳ Computing the Population-Weighted Spatial Average of the Exposure for all regions\n')
+
+        # get spatial average per region 
+        for ind_region,region in enumerate(region_names): 
+
+            print(f'Computing LFE in {region}                 ', end='\r')
+
+            countries = get_countries_of_region(region, df_countries)
+
+            ind_country = countries_regions.map_keys(countries)
+
+            # historical + RCP simulations
+            d_exposure_perregion[region] = calc_weighted_fldmean( 
+                da_AFA,
+                countries_mask, 
+                ind_country,
+                weights=da_population, 
+                areaweighted=False
+            )
+
+            # weighted avg life expectancy, weighted by n of people aged 0 per country 
+            values = df_life_expectancy_5[countries]
+            weights = da_cohort_size.sel(country=countries, ages=0).to_pandas().T.loc[values.index]
+
+            d_life_expectancy_perregion[region] = (values * weights).sum(axis=1) / weights.sum(axis=1)
+
+        
+        # Convert dict to dataframe for vectorizing and integrate exposures   
+        # avg population-weighted exposure per country per year
+        frame = {k:v.values for k,v in d_exposure_perregion.items()}
+        df_exposure_perregion = pd.DataFrame(frame,index=year_range)  
+
+        frame = {k:v.values for k,v in d_life_expectancy_perregion.items()}
+        df_life_expectancy_perregion = pd.DataFrame(frame,index=birth_years)  
+
+        print('🟢 Population-Weighted Spatial Average of the Exposure for all countries and regions Computed')
+
+
 
         # loop over warming scenarios : RCP (model years), example trajs, stylized trajectories (strj)
+        # TODO: do it also per RCP scenario?? add this! 
         for suffix in var_suffixes+['strj']:
 
-            print(f'Computing land fraction exposed (LFE) for {suffix} \n')
+            if suffix =='RCP':
+
+                pass
+        
+            elif suffix in var_suffixes:
+
+                print(f'Computing land fraction exposed (LFE) for {suffix} \n')
+
+                if d_climate_data_meta[i][f'GMT_{suffix}_valid']: # if valid
+
+                    ind_RCP = d_climate_data_meta[i][f'ind_RCP2GMT_{suffix}']
+
+                    # remap per pathway and calc lifetime exposure per country 
+                    d_le_percountry_perrun = df_exposure_percountry.apply(
+                        lambda col: calc_life_exposure(
+                            df_exposure_percountry.reindex(df_exposure_percountry.index[ind_RCP]).set_index(df_exposure_percountry.index),
+                            df_life_expectancy_5,
+                            col.name,
+                            ),
+                        axis=0,
+                        )
+
+                    # convert dataframe to data array of lifetime exposure (le) per country and birth year
+                    ds_le_percountry_perrun[f'le_percountry_perrun_{suffix}'].loc[{
+                        'run':i,
+                    }] = d_le_percountry_perrun.values.transpose() 
 
 
+                    # remap per pathway and calc lifetime exposure per region 
+                    d_le_perregion_perrun = df_exposure_perregion.apply(
+                        lambda col: calc_life_exposure(
+                            df_exposure_perregion.reindex(df_exposure_perregion.index[ind_RCP]).set_index(df_exposure_perregion.index),
+                            df_life_expectancy_perregion,
+                            col.name,
+                            ),
+                        axis=0,
+                        )
+
+                    # convert dataframe to data array of lifetime exposure (le) per country and birth year
+                    ds_le_perregion_perrun[f'le_perregion_perrun_{suffix}'].loc[{
+                        'run':i,
+                    }] = d_le_perregion_perrun.values.transpose() 
+                
+            elif suffix == 'strj':
+
+                pass
 
 
-    pass
-
-
-    # see convo with ChatGPT!! 
-
-
-    return 
+    return ds_le_percountry_perrun, ds_le_perregion_perrun, region_names
