@@ -487,7 +487,8 @@ def load_population(
             return da.sel(time=slice(startyear, endyear))
         # region slicing 
         latmin, latmax, lonmin, lonmax = bbox 
-        if da.lat.values[0] < da.lat.values[-1]: # check if lat is increasing or decreasing
+        #if da.lat.values[0] < da.lat.values[-1]: # check if lat is increasing or decreasing
+        if da.lat.isel(lat=0) < da.lat.isel(lat=-1):# check if lat is increasing or decreasing
             return da.sel(
                 lat=slice(latmin, latmax), lon=slice(lonmin, lonmax), time=slice(startyear, endyear)
                 )
