@@ -952,6 +952,14 @@ def calc_lifetime_exposure(
         frame = {k:v.values for k,v in d_life_expectancy_perregion.items()}
         df_life_expectancy_perregion = pd.DataFrame(frame,index=birth_years)  
 
+
+        # convert to da for saving output 
+        da_life_expectancy_perregion = xr.DataArray(
+            df_life_expectancy_perregion.values.astype(float),
+            dims=['birth_year', 'region'],
+            coords={'birth_year': df_life_expectancy_perregion.index, 'region': np.arange(len(region_names))}
+        )
+
         print('🟢 Population-Weighted Spatial Average of the Exposure for all countries and regions Computed')
 
         
@@ -1088,17 +1096,207 @@ def calc_lifetime_exposure(
 
 
 
-
-    return ds_le_percountry_perrun, ds_le_perregion_perrun, region_names
-
-
-def calc_landfraction_exposed_mmm():
+    return ds_le_percountry_perrun, ds_le_perregion_perrun, region_names, da_life_expectancy_perregion
 
 
-    pass
+def calc_landfraction_exposed_mmm(
+    ds_lfe_perrun,
+    GMT_extra_trajectories_names
+    ):
+    """
+    Aggregate across different runs (i.e. across remapped simulations), for each target trajectory 
+    to get the spread across (remapped/synthetic) runs for each target simulation 
+
+    Input
+
+    Returns
+        mmm:                    multi model mean (mean across synthetic/remapped simulations/runs)
+        std:                    std across remapped runs
+        lqntl, median, uqntl:   0.25, median (0.5), 0.75 quantile 
+        _sm:                    10 year rolling mean
+        sample_size:            number of valid remapped simulations for that stylized trajectory
+
+    
+    Notes:
+    - TODO apply RIME approach to remapping
+    - could create a 'quantile' dim instead of separate lqntl,uqntl,median ! might be cleaner
+    - not sure why you want to smooth the median and std in fxn? can always do this after.. 
+
+    """
+
+    # remove from the output a warning that appears often  
+    import warnings
+    warnings.filterwarnings("ignore", message="All-NaN slice encountered")
+
+    # -------------------------------------------------- #
+    #             Computation of MMM and Stats           #
+    # -------------------------------------------------- #
+
+    ds_perrun = ds_lfe_perrun.copy()
+
+    if 'region' in ds_perrun.dims:
+
+        unit='region'
+    
+    elif 'country' in ds_perrun.dims:
+
+        unit='country'
+    
+    print(f"\nComputing the MMM and stats for each {unit}")
+
+    # loop over target trajectories
+    var_suffixes = GMT_extra_trajectories_names+['strj'] 
+
+    for suffix in var_suffixes:
+        mmm = ds_perrun[f'landfrac_peryear_per{unit}_{suffix}'].mean(dim='run', skipna=True)
+        mmm_sm = mmm.rolling(time_ind=10, center=True, min_periods=1).mean()
+        std = ds_perrun[f'landfrac_peryear_per{unit}_{suffix}'].std(dim='run', skipna=True)
+        std_sm = std.rolling(time_ind=10, center=True, min_periods=1).mean()
+        lqntl = ds_perrun[f'landfrac_peryear_per{unit}_{suffix}'].quantile(
+            q=0.25,
+            dim='run',
+            method='inverted_cdf',
+            skipna=True
+        )
+        uqntl = ds_perrun[f'landfrac_peryear_per{unit}_{suffix}'].quantile(
+            q=0.75,
+            dim='run',
+            method='inverted_cdf',
+            skipna=True
+        )
+        median = ds_perrun[f'landfrac_peryear_per{unit}_{suffix}'].quantile(
+            q=0.5,
+            dim='run',
+            method='inverted_cdf',
+            skipna=True
+        )
+        median_sm = median.rolling(time_ind=10, center=True, min_periods=1).mean()
+
+        other_dims = set(ds_perrun.dims) - {'run', 'GMT'}
+        isel_dict = {dim: 0 for dim in other_dims}
+        sample_size = ds_perrun[f'landfrac_peryear_per{unit}_{suffix}'].isel(**isel_dict).notnull().sum(dim='run')
+
+        ds_perrun[f'mmm_{suffix}'] = mmm
+        ds_perrun[f'mmm_{suffix}_sm'] = mmm_sm
+        ds_perrun[f'std_{suffix}'] = std
+        ds_perrun[f'std_{suffix}_sm'] = std_sm
+        ds_perrun[f'lqntl_{suffix}'] = lqntl
+        ds_perrun[f'uqntl_{suffix}'] = uqntl
+        ds_perrun[f'median_{suffix}'] = median
+        ds_perrun[f'median_{suffix}_sm'] = median_sm
+        ds_perrun[f'sample_size_{suffix}'] = sample_size
+
+        # TODO: replace med,lq,uq with a single var with a quantile dimension?? and dont drop the quantile dimension
+
+    return ds_perrun.reset_coords().drop_vars('quantile')
 
 
-def calc_lifetime_exposure_mmm():
 
 
-    pass
+
+def calc_lifetime_exposure_mmm(
+    ds_le_perrun,
+    GMT_extra_trajectories_names,
+    year_ref=1950
+    ):
+    """
+
+    NOTE: I changed how the EMF med,uq,lq,mean is calculated! first calc the EMF for each model then aggregate - which i think is more correct
+    """
+
+        # remove from the output a warning that appears often  
+    import warnings
+    warnings.filterwarnings("ignore", message="All-NaN slice encountered")
+
+    # -------------------------------------------------- #
+    #             Computation of MMM and Stats           #
+    # -------------------------------------------------- #
+
+    ds_perrun = ds_le_perrun.copy()
+
+    if 'region' in ds_perrun.dims:
+
+        unit='region'
+    
+    elif 'country' in ds_perrun.dims:
+
+        unit='country'
+    
+    print(f"\nComputing the MMM and stats for each {unit}")
+
+    # loop over target trajectories
+    var_suffixes = GMT_extra_trajectories_names+['strj'] 
+
+    for suffix in var_suffixes:
+
+        var_name = f'le_per{unit}_perrun_{suffix}'
+
+        mmm = ds_perrun[var_name].mean(dim='run', skipna=True)
+        std = ds_perrun[var_name].std(dim='run', skipna=True)
+        lqntl = ds_perrun[var_name].quantile(
+            q=0.25,
+            dim='run',
+            method='inverted_cdf',
+            skipna=True
+        )
+        uqntl = ds_perrun[var_name].quantile(
+            q=0.75,
+            dim='run',
+            method='inverted_cdf',
+            skipna=True
+        )
+        median = ds_perrun[var_name].quantile(
+            q=0.5,
+            dim='run',
+            method='inverted_cdf',
+            skipna=True
+        )
+
+        # number of valid remapped trajectories 
+        other_dims = set(ds_perrun.dims) - {'run', 'GMT'}
+        isel_dict = {dim: 0 for dim in other_dims}
+        sample_size = ds_perrun[var_name].isel(**isel_dict).notnull().sum(dim='run')
+
+        # EMF compared to reference birthyear
+        EMF = ds_perrun[var_name] / ds_perrun[var_name].sel(birth_year=year_ref)
+
+        mmm_EMF = EMF.mean(dim='run', skipna=True)
+        lqntl_EMF = EMF.quantile(
+            q=0.25,
+            dim='run',
+            method='inverted_cdf',
+            skipna=True
+        )
+        uqntl_EMF = EMF.quantile(
+            q=0.75,
+            dim='run',
+            method='inverted_cdf',
+            skipna=True
+        )
+        median_EMF = EMF.quantile(
+            q=0.5,
+            dim='run',
+            method='inverted_cdf',
+            skipna=True
+        )
+
+        # TODO: make a quantile dim instead of all these extra variables !! you can group med,lq,uq 
+        # NOTE: this one doesnt have the _sm variables! 
+
+
+        ds_perrun[f'mmm_{suffix}'] = mmm
+        ds_perrun[f'std_{suffix}'] = std
+        ds_perrun[f'lqntl_{suffix}'] = lqntl
+        ds_perrun[f'uqntl_{suffix}'] = uqntl
+        ds_perrun[f'median_{suffix}'] = median
+        ds_perrun[f'sample_size_{suffix}'] = sample_size
+        ds_perrun[f'mmm_EMF_{suffix}'] = mmm_EMF
+        ds_perrun[f'lqntl_EMF_{suffix}'] = lqntl_EMF
+        ds_perrun[f'uqntl_EMF_{suffix}'] = uqntl_EMF
+        ds_perrun[f'median_EMF_{suffix}'] = median_EMF
+
+    return ds_perrun.reset_coords().drop_vars('quantile')
+
+
+
+
