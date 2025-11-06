@@ -31,22 +31,51 @@ script_dir = os.path.abspath( os.path.dirname( __file__ ) )
 
 
 
-
 def calc_gmt_anomaly_correction(
-    filepath_gmst_obs=os.path.join(data_dir,'gmst-obs/GCH_time_series_of_annual_global_temperatures_1850-2024_wrt_1991-2020.csv'),
+    filepath_gmst_obs=os.path.join('data', 'gmst-obs/GCH_time_series_of_annual_global_temperatures_1850-2024_wrt_1991-2020.csv'),
     col='ERA5',
-    gmt_anomaly_baseline_period = (1850,1900),
-    ):
+    gmt_anomaly_baseline_period=(1850, 1900),
+    skiprows=3,index_col=0, na_values=-999,
+    **kwargs
+):
+    """
+    Calculate mean warming in reference period from observational GMT wrt. 1850–1900.
 
-    df_gmt_obs = pd.read_csv(filepath_gmt_obs,skiprows=3,index_col=0, na_values=-999,usecols=[0,1,2,3,4,5])
+    If you want to rebaseline everything to a different period (e.g., bias adjustment time-period),
+    you can provide this as `gmt_anomaly_baseline_period` and then in load_climate_data use the output
+    of calc_gmt_anomaly_correction as the argument gmt_anomaly_correction to re-express everything
+    wrt. 1850–1900.
 
-    anomaly_correction = gmt_obs[[col]].loc[gmt_anomaly_baseline_period[0]:gmt_anomaly_baseline_period[1]].mean()[0]
+    Inputs
+        filepath_gmst_obs (str):                        Filepath to the observational GMST dataset.
+        col (str):                                      Column name to use (e.g., 'ERA5', 'HadCRUT5', etc.).
+        gmt_anomaly_baseline_period (tuple(int, int)):  Start and end years of the baseline period.
+        **kwargs :                                      Additional keyword arguments passed to `pandas.read_csv`.
+                                                        Defaults if not overwritten: skiprows=3,index_col=0, na_values=-999
+
+    Returns
+        (float) Mean anomaly correction over the specified baseline period.
+    """
+
+    # Default read_csv args
+    read_csv_kwargs = dict(skiprows=skiprows,index_col=index_col, na_values=na_values)
+    # Allow user to override defaults
+    read_csv_kwargs.update(kwargs)
+    # open gmt file 
+    df_gmt_obs = pd.read_csv(filepath_gmst_obs, **read_csv_kwargs)
+
+    # ensure index is year (if not already)
+    if not isinstance(df_gmt_obs.index, pd.Index):
+        df_gmt_obs.set_index(df_gmt_obs.columns[0], inplace=True)
+
+    anomaly_correction = (
+        df_gmt_obs[[col]]
+        .loc[gmt_anomaly_baseline_period[0]:gmt_anomaly_baseline_period[1]]
+        .mean()
+        .iloc[0]
+    )
 
     return anomaly_correction
-
-
-
-
 
 
 
@@ -294,16 +323,17 @@ def calc_weighted_fldmean(
                 weights = weights.sel(time=da_masked.time)
         elif areaweighted: 
             lat = da[get_lat_name(da)]
-            weights = np.cos(np.deg2rad(lat))        
+            weights = np.cos(np.deg2rad(lat))      
+
         other_dims = set(da.dims) - {'time'}
+
         return da_masked.weighted(weights).mean(other_dims,skipna=True).reset_coords(drop=True)
 
-    # match grids
-    da = da.interp_like(countries_mask, method='linear')
+    # match grids - do this outside of loop ! check its ok 
+    #da = da.interp_like(countries_mask, method='linear')
 
     # only keeps the AFA data for the country under study, for the others a NaN value is attributed
-    #if len(ind_country) == 1: 
-    if np.isscalar(ind_country):
+    if np.isscalar(ind_country) or len(ind_country) == 1:
 
         da_masked = da.where(countries_mask == ind_country)
     
@@ -318,6 +348,10 @@ def calc_weighted_fldmean(
     del da_masked
 
     return da_weighted_fldmean
+
+
+
+    # version 2 ! 
 
 
 
@@ -376,7 +410,7 @@ def load_climate_data_array(climatedata_dir,
     VAR = list(da_AFA.data_vars)[0] # assumes there is only one variable of interest ! 
     da_AFA = da_AFA[VAR]
 
-    # 4) if needed, repeat mean of last 10 years until entire period of interest is covered - NOTE: do you need da_AFA here??? you're not using it in this fxn
+    # 4) if needed, repeat mean of last 10 years until entire period of interest is covered 
     if da_AFA.time.max() < year_end: 
         da_AFA_lastyear = da_AFA.isel(time=slice(-10, None)).mean(dim='time').expand_dims(dim='time',axis=0)
         for year in range(da_AFA.time.max().values+1,year_end+1): 
@@ -408,7 +442,7 @@ def calc_landfraction_exposed(
     weights=None,
     areaweighted=True,
     convert_to_binary=False,  # if your data array is number of exceedances per year, if you set this to True you get fraction of land area exposed to at least 1 day
-    convert_to_binary_threshold=0,
+    convert_to_binary_threshold=0,    # if you want to manually set the number of days 
 ):
     """
     Calc area-weighted average of your input hazard dataset per country and per region. Results are given per origina RCP model years and after GMT-remapping 
@@ -444,6 +478,8 @@ def calc_landfraction_exposed(
     ])
 
     nregions = len(region_names)
+
+    # TODO: allow additionally for user-defined regions! e.g. Mediterranean
 
     # Shared shape for all variables
     year_range = np.arange(year_start, year_end+1)
@@ -533,6 +569,9 @@ def calc_landfraction_exposed(
                     year_end,
                     bbox
                     )
+        
+        # align for masking if there are minor differences
+        da_AFA = da_AFA.interp_like(countries_mask, method='linear')
 
 
         if convert_to_binary:
@@ -589,10 +628,6 @@ def calc_landfraction_exposed(
                             src = ds_lfe_perregion_perrun['landfrac_peryear_perregion_RCP'].sel(run=i, region=ind_region)
 
                             ds_lfe_perregion_perrun[f'landfrac_peryear_perregion_{suffix}'].loc[dict(run=i, region=ind_region, GMT=GMT)] = src.isel(time_ind=ind_RCP).values
-
-
-
-
 
 
 
@@ -819,20 +854,23 @@ def calc_lifetime_exposure(
                     bbox
                     )
         
+        # align for masking if there are minor differences
+        da_AFA = da_AFA.interp_like(countries_mask, method='linear')
+        
         #---------------------------------------------------------------------#
         # Computation of the weighted by population field mean of AFA for     # 
         # each ISIMIP simulations for each country                            #
         #---------------------------------------------------------------------#
 
-        # initialise dict
-        d_exposure_percountry = {}
-
         print('⏳ Computing the Population-Weighted Spatial Average of the Exposure for all countries\n')
+
+        #initialise dict
+        d_exposure_percountry = {}
 
         # get spatial average per country
         for j, country in enumerate(df_countries['name']): 
 
-            print(f'Computing LFE in {country}                              ', end='\r')
+            print(f'Computing lifetime exposure (LE) in {country}                              ', end='\r')
 
             # calculate mean per country weighted by population
             ind_country = countries_regions.map_keys(country)
@@ -845,22 +883,43 @@ def calc_lifetime_exposure(
                 weights=da_population, 
                 areaweighted=False
             )
+        
+        print(f'Converting to dataframe                              ', end='\r')
                         
-        # Convert dict to dataframe for vectorizing and integrate exposures   
+        # Convert dict to dataframe for vectorizing and integrate exposures   - TODO: I think this step is slow? 
         # avg population-weighted exposure per country per year
         frame = {k:v.values for k,v in d_exposure_percountry.items()}
-        df_exposure_percountry = pd.DataFrame(frame,index=year_range)         
+        df_exposure_percountry = pd.DataFrame(frame,index=year_range)      
+
+
+    # # TODO: Alternative that should be faster ? Test for countries and regions? Not sure its better 
+
+    #     countries = df_countries['name']
+
+    #     # compute all countries
+    #     results = [
+    #         calc_weighted_fldmean(
+    #             da_AFA, countries_mask, countries_regions.map_keys(country),
+    #             weights=da_population, areaweighted=False
+    #         )
+    #         for country in countries
+    #     ]
+
+    #     df_exposure_percountry = xr.concat(results, dim="country").to_pandas().T
+    #     df_exposure_percountry.columns = countries  
+
+
+
+        print('⏳ Computing the Population-Weighted Spatial Average of the Exposure for all regions\n')
 
         # initialise dict
         d_exposure_perregion = {}
         d_life_expectancy_perregion = {}
 
-        print('⏳ Computing the Population-Weighted Spatial Average of the Exposure for all regions\n')
-
         # get spatial average per region 
         for ind_region,region in enumerate(region_names): 
 
-            print(f'Computing LFE in {region}                 ', end='\r')
+            print(f'Computing lifetime exposure (LE) in {region}                 ', end='\r')
 
             countries = get_countries_of_region(region, df_countries)
 
@@ -881,7 +940,10 @@ def calc_lifetime_exposure(
 
             d_life_expectancy_perregion[region] = (values * weights).sum(axis=1) / weights.sum(axis=1)
 
+
+        print(f'Converting to dataframe                              ', end='\r')
         
+
         # Convert dict to dataframe for vectorizing and integrate exposures   
         # avg population-weighted exposure per country per year
         frame = {k:v.values for k,v in d_exposure_perregion.items()}
@@ -892,19 +954,56 @@ def calc_lifetime_exposure(
 
         print('🟢 Population-Weighted Spatial Average of the Exposure for all countries and regions Computed')
 
+        
+        
+        del d_exposure_percountry, d_exposure_perregion, d_life_expectancy_perregion # for memory
+
 
 
         # loop over warming scenarios : RCP (model years), example trajs, stylized trajectories (strj)
-        # TODO: do it also per RCP scenario?? add this! 
+
         for suffix in var_suffixes+['strj']:
+
+            print(f'Computing lifetime exposure (LE) for {suffix} \n')
 
             if suffix =='RCP':
 
-                pass
-        
-            elif suffix in var_suffixes:
+                # calc lifetime exposure per country without remapping
+                    d_le_percountry_perrun = df_exposure_percountry.apply(
+                        lambda col: calc_life_exposure(
+                            df_exposure_percountry,
+                            df_life_expectancy_5,
+                            col.name,
+                            ),
+                        axis=0,
+                        )
 
-                print(f'Computing land fraction exposed (LFE) for {suffix} \n')
+                    # convert dataframe to data array of lifetime exposure (le) per country and birth year
+                    ds_le_percountry_perrun[f'le_percountry_perrun_{suffix}'].loc[{
+                        'run':i,
+                    }] = d_le_percountry_perrun.values.transpose() 
+
+
+                    # calc lifetime exposure per region without remapping
+                    d_le_perregion_perrun = df_exposure_perregion.apply(
+                        lambda col: calc_life_exposure(
+                            df_exposure_perregion,
+                            df_life_expectancy_perregion,
+                            col.name,
+                            ),
+                        axis=0,
+                        )
+
+                    # convert dataframe to data array of lifetime exposure (le) per country and birth year
+                    ds_le_perregion_perrun[f'le_perregion_perrun_{suffix}'].loc[{
+                        'run':i,
+                    }] = d_le_perregion_perrun.values.transpose()  
+        
+
+
+
+
+            elif suffix in var_suffixes:
 
                 if d_climate_data_meta[i][f'GMT_{suffix}_valid']: # if valid
 
@@ -941,9 +1040,65 @@ def calc_lifetime_exposure(
                         'run':i,
                     }] = d_le_perregion_perrun.values.transpose() 
                 
+
+
+
             elif suffix == 'strj':
 
-                pass
+                for step, GMT in enumerate(GMT_labels):
+
+                        if d_climate_data_meta[i]['GMT_strj_valid'][step]:
+                            
+                            # check validity
+                            ind_RCP = d_climate_data_meta[i]['ind_RCP2GMT_strj'][:,step]
+
+                            # remap per pathway and calc lifetime exposure per country 
+                            d_le_percountry_perrun = df_exposure_percountry.apply(
+                                lambda col: calc_life_exposure(
+                                    df_exposure_percountry.reindex(df_exposure_percountry.index[ind_RCP]).set_index(df_exposure_percountry.index),
+                                    df_life_expectancy_5,
+                                    col.name,
+                                    ),
+                                axis=0,
+                                )
+
+                            # convert dataframe to data array of lifetime exposure (le) per country and birth year
+                            ds_le_percountry_perrun[f'le_percountry_perrun_{suffix}'].loc[{
+                                'run':i,
+                                'GMT':GMT,
+                            }] = d_le_percountry_perrun.values.transpose() 
+
+
+                            # remap per pathway and calc lifetime exposure per region 
+                            d_le_perregion_perrun = df_exposure_perregion.apply(
+                                lambda col: calc_life_exposure(
+                                    df_exposure_perregion.reindex(df_exposure_perregion.index[ind_RCP]).set_index(df_exposure_perregion.index),
+                                    df_life_expectancy_perregion,
+                                    col.name,
+                                    ),
+                                axis=0,
+                                )
+
+                            # convert dataframe to data array of lifetime exposure (le) per country and birth year
+                            ds_le_perregion_perrun[f'le_perregion_perrun_{suffix}'].loc[{
+                                'run':i,
+                                'GMT':GMT,
+                            }] = d_le_perregion_perrun.values.transpose() 
+
+
+
 
 
     return ds_le_percountry_perrun, ds_le_perregion_perrun, region_names
+
+
+def calc_landfraction_exposed_mmm():
+
+
+    pass
+
+
+def calc_lifetime_exposure_mmm():
+
+
+    pass
