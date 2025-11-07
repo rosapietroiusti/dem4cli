@@ -6,26 +6,23 @@ Update 2025 with new data
 
 To do
 > understand how best to deal with having v1 and v2... e.g. 
-    - have only one pop_demographics file but make flags, outside of functions or inside functions saying which functions get loaded.... 
+    - have only one pop_demographics file but make flags, outside of functions 
+    or inside functions saying which functions get loaded.... 
     - remove v1? 
-
-
 """ 
 #%%
 
+import glob, os, re, sys
+import warnings
+from math import ceil
 import numpy as np
 import xarray as xr
 import pandas as pd
-import geopandas as gpd # can maybe delete if i dont open geojson in the end 
-from scipy import interpolate
-import glob, os, re, sys
-import warnings
-import openpyxl 
-from math import ceil 
-import regionmask 
+import geopandas as gpd
+import regionmask
 from shapely.geometry import box
 
-from ._utils import * 
+from ._utils import *
 from ._settings import *
 
 #%%
@@ -36,8 +33,8 @@ from ._settings import *
 
 @timeit
 def load_country_metadata(
-    filepath_world_bank = filepath_world_bank_meta, # what year is this from? 
-    filepath_lookuptable=filepath_lookuptable, 
+    filepath_world_bank = filepath_world_bank_meta, # what year is this from?
+    filepath_lookuptable=filepath_lookuptable,
     data_source_cohorts=flags['cohort_sizes_source'],
     worldbank_filter=True,
 ):
@@ -50,7 +47,7 @@ def load_country_metadata(
         data_source_cohorts (str): 'UNWPP2024' or 'WCDE'
     
     Returns
-        df_metadata (df):       table with country name, ISO3 code, country code, region and income group 
+        df_metadata (df):       country name, ISO3 code, country code, region, income group 
                                 filtered based on life expectancy and cohort size data availability 
                                 and if world_bank filter is True also based on WB categorization
     
@@ -58,55 +55,77 @@ def load_country_metadata(
 
     # 1) World Bank data
 
-    # open world bank categorization: 218 countries total 
-    df_metadata = pd.read_excel(filepath_world_bank_meta, sheet_name=0)
-    # get rid of regions 
+    # open world bank categorization: 218 countries total
+    df_metadata = pd.read_excel(filepath_world_bank, sheet_name=0)
+    # get rid of regions
     df_metadata = df_metadata[~df_metadata['Region'].isna()]
     # rename
     keep_cols =['Economy', 'Code', 'Region', 'Income group']
-    d_rename={'Economy':'country','Code':'abbreviation', 'Region':'region', 'Income group': 'incomegroup'} # could call this country_wb ? or name_wb? 
+    d_rename={
+        'Economy':'country',
+        'Code':'abbreviation', 
+        'Region':'region',
+        'Income group': 'incomegroup'}
     df_metadata = df_metadata[keep_cols].rename(columns=d_rename) 
 
 
-    # 2) Lookup table : cohort size and life expectancy 
+    # 2) Lookup table : cohort size and life expectancy
 
     # open lookup table
     df = pd.read_csv(filepath_lookuptable)
 
-    # overlap of cohort size (WPP/WCDE) and life expectancy (WPP) data  
+    # overlap of cohort size (WPP/WCDE) and life expectancy (WPP) data
     if data_source_cohorts == 'WCDE':
-        # 201 countries 
+        # 201 countries
         df_overlap = df[
                         (df[["SSP name", "WPP name"]].notna().all(axis=1)) &
                         (df["Data availability"] == "Full historical + SSP")
                     ].reset_index(drop=True)
-    elif data_source_cohorts == 'UNWPP2024': 
-        # 236 countries 
+    elif data_source_cohorts == 'UNWPP2024':
+        # 236 countries
         df_overlap = df[
-                        (df[["SSP name", "WPP name"]].notna().all(axis=1)) 
+                        (df[["SSP name", "WPP name"]].notna().all(axis=1))
                     ].reset_index(drop=True)
+    else:
+        raise ValueError("data_source_cohorts must be WCDE or UNWPP2024")
 
     df_overlap = df_overlap[["SSP name", "WPP name", "ISO numeric", "ISO alpha-3"]]
 
 
     if worldbank_filter:
-
-        # only include countries that are also in WB categorization and have life expectancy and cohort size data
-        # 217 with UNWPP cohorts (lose only Channel Islands, which do have data but separately as Jersey/Guernsey) 
+        # only include countries that are also in WB categorization
+        # and have life expectancy and cohort size data
+        # 217 with UNWPP cohorts (lose Channel Islands, data available as Jersey/Guernsey)
         # 195 with WCDE
-        # this goes down with countrymasks 
         
-        df_metadata_filtered = df_metadata.merge(df_overlap, how='inner', left_on='abbreviation', right_on='ISO alpha-3').reset_index(drop=True).rename(columns={ 'ISO numeric': 'country_code', 'WPP name':'name' })
-        df_metadata_filtered = df_metadata_filtered[['abbreviation', 'region', 'incomegroup', 'country_code', 'SSP name', 'name'   ]]
+        df_metadata_filtered = df_metadata.merge(
+            df_overlap, how='inner', left_on='abbreviation', right_on='ISO alpha-3'
+            ).reset_index(drop=True
+            ).rename(columns={ 
+                'ISO numeric': 'country_code', 
+                'WPP name':'name' })
+
+        df_metadata_filtered = df_metadata_filtered[[
+            'abbreviation', 'region', 'incomegroup', 'country_code', 'SSP name', 'name'  
+             ]]
 
     else: 
-
         # include all countries that have all demographic data even if not in WB categorization
         # 236 with UNWPP
         # 201 with WCDE
 
-        df_metadata_filtered = df_metadata.merge(df_overlap, how='right', left_on='abbreviation', right_on='ISO alpha-3').reset_index(drop=True).drop(columns='abbreviation').rename(columns={'ISO alpha-3':'abbreviation', 'ISO numeric': 'country_code', 'WPP name' : 'name' })
-        df_metadata_filtered = df_metadata_filtered[['abbreviation', 'region', 'incomegroup', 'country_code', 'SSP name', 'name'   ]]
+        df_metadata_filtered = df_metadata.merge(
+            df_overlap, how='right', left_on='abbreviation', right_on='ISO alpha-3'
+            ).reset_index(drop=True
+            ).drop(columns='abbreviation'
+            ).rename(columns={
+                'ISO alpha-3':'abbreviation', 
+                'ISO numeric': 'country_code', 
+                'WPP name' : 'name' })
+
+        df_metadata_filtered = df_metadata_filtered[[
+            'abbreviation', 'region', 'incomegroup', 'country_code', 'SSP name', 'name'   
+            ]]
 
         
     return df_metadata_filtered.set_index('name', drop=False)
@@ -122,7 +141,7 @@ def load_country_metadata(
 @timeit
 def load_cohort_sizes( 
     dir_cohortsizes = dir_cohortsizes,
-    data_source = flags['cohort_sizes_source'], # 'WCDE' or 'UNWPP2024' 
+    data_source = flags['cohort_sizes_source'], # 
     ssp = 2,
     by_sex = False,
 ):
@@ -134,26 +153,29 @@ def load_cohort_sizes(
     Version 2: version 3.2 beta (for CMIP7)
 
     data description: Population Size (000's)
-    De facto population in a country or region, classified by sex and by five-year age groups. Available in all scenarios and at all geographical scales. For each country data is sorted first by age cohort (0-4, 4-9...). So all the first data refers to the 0-4 age cohort. 
+    De facto population in a country or region, classified by sex and by five-year age groups. 
+    Available in all scenarios and at all geographical scales. 
+    For each country data is sorted first by age cohort (0-4, 4-9...). 
     Then they give the population size of that cohort at a snapshot every 5 years (1950, 1955, 1960...).
     Here we assign the data to the central age cohort (i.e. 0-4 assigned to 2).
     
     Input
-        dir_cohortsizes (str): path to cohortsize files
-        ssp (int): 1,2 or 3 for ssp1, ssp2, ssp3 (only if data_source == 'WCDE')
-        by_sex (Bool): TODO (data is available male/female) - in version 2 this is automatic
+        dir_cohortsizes (str):      path to cohortsize files
+        data_source (str):          'WCDE' or 'UNWPP2024' 
+        ssp (int):                  1,2 or 3 for ssp1, ssp2, ssp3 (only if data_source == 'WCDE')
+        by_sex (Bool):              TODO (data is available male/female) - in version 2 this is automatic
+        
 
     Returns
         df_cohort_sizes (v1: df, v2: da):   v1: rows are countries, columns are a cohort's (e.g. age=2) 
-                                            size each year, then the next cohort (columns labelled e.g. 2_1950 age=2, year=1950) 
+                                            size each year, then the next cohort 
+                                            (columns labelled e.g. 2_1950 age=2, year=1950) 
                                             v2: data array indexed by age 
         ages (arr) : central year of interval (2,7...102)
         years (arr) : years we have data for (1950, 1955...2100)
 
     Note: 
-    - this also exists from UNWPP2024! Could be more consistent with life expectancy data 
     - in v2 its a da not a df !!! TODO: change version 1 so it also gives a da?  
-
     """
 
     def convert_age_range(age):
@@ -182,7 +204,9 @@ def load_cohort_sizes(
             if not by_sex:
 
                 # select only relevant rows and cols
-                df = df_raw[(df_raw['Sex'] == 'Both') & (df_raw['Age'] != 'All') & (df_raw['Area'] != 'World')][['Area', 'Year', 'Age', 'Population']]
+                df = df_raw[(df_raw['Sex'] == 'Both') & (df_raw['Age'] != 'All') & (df_raw['Area'] != 'World')][[
+                    'Area', 'Year', 'Age', 'Population'
+                    ]]
                 
                 # central year in age bracket e.g. 0-4 becomes 2, 5-9 becomes 7 
                 df['Age'] = df['Age'].apply(convert_age_range) + 2 
@@ -211,7 +235,7 @@ def load_cohort_sizes(
 
         if data_source == 'WCDE': # cohort sizes from SSP projections v3.2-beta
 
-            filepath = dir_cohortsizes+f'/ssp_basic_drivers_release_3.2.beta_full.xlsx'
+            filepath = dir_cohortsizes+'/ssp_basic_drivers_release_3.2.beta_full.xlsx'
             df = pd.read_excel(filepath, sheet_name=1)
 
             # Exclude rows where 'region' contains (R<number>), i.e. world regions
@@ -291,10 +315,10 @@ def load_cohort_sizes(
             ages = da.ages.values
             years = da.time.values
 
-            df_cohort_sizes = da
+            df_cohort_sizes = da # TODO: rename this, its not a df anymore
 
 
-    return df_cohort_sizes, ages, years # TODO: rename this, its not a df anymore
+    return df_cohort_sizes, ages, years 
 
 
 
@@ -374,7 +398,6 @@ def interpolate_cohortsize_countries(
 
             # interpolate per ages
             wcde_per_country_df = wcde_per_country_df.reindex(ages_interpn_cohorts)
-            wcde_per_country_df
             wcde_per_country_intrp = wcde_per_country_df.astype('float').interpolate(
                     method=extend_method, # original 'linear' filled end values with constants; slinear calls spline linear interp/extrap from scipy interp1d - check if this is ok 
                     limit_direction='both',
@@ -553,9 +576,9 @@ def load_population(
         startyear_ssp = 2025 
 
         if startyear <= 2025:
-            print(f'opening compass - historical')
+            print('opening compass - historical')
             da_pop_histsoc = xr.open_mfdataset(
-                sorted(glob.glob(os.path.join(dir_population, f'historical/Population_count_*_historical.nc'))),
+                sorted(glob.glob(os.path.join(dir_population, 'historical/Population_count_*_historical.nc'))),
                 combine='nested',
                 concat_dim='time',
                 decode_coords='all',
@@ -624,11 +647,10 @@ def load_countrymask(
         country_regions, country_mask (regionmask objects - only if country_borders is gdf)
         df_countries (df)
 
-    Note
-    - divide into two different functions? for frax versus shapefile? 
-    - TODO: test with frax countrymask - only tested for shapefiles now  
 
     """
+
+    #TODO: divide into two different functions? for frax versus shapefile? 
 
     def cut_to_region(da, bbox):
         # cut to a predefined region
@@ -698,9 +720,6 @@ def load_countrymask(
             print('Note option to not filter countries based on df_metadata not tested')
 
         return da_countrymasks, None, None, df_countries 
-
-        # NOTE: rename the countries from ISO3 to the country names?? Or do it in wrapper fxn? 
-
 
 
     elif data_source_countrymask == 'shapefile':
@@ -833,15 +852,22 @@ def get_life_expectancies(df_unwpp,
                          end_birthyear=2025):
     
     """
-    - Takes UNWPP life expectancy data expressed as years left to live at age of 5, 
+    Takes UNWPP life expectancy data expressed as years left to live at age of 5, 
     subtracts 5 from Year to get it at birth year but ignoring infant mortality, 
     adds 5 to account for the 5 years of life already lived, adds 6 to account for increase 
     in life expectancy through the life of an individual (i.e. move from "period" life expectancy to 
     "cohort" life expectancy, see Goldstein & Wachter (2006) "Relationships between period and cohort 
     life expectancy: Gaps and lags")
-    - Thus get life expectancy in each year for each country at birth 
+
+    Thus get life expectancy in each year for each country at birth 
     expressed in "cohort" way, neglecting infant mortality.
-    - Data ends for 2018 cohort (5 y.o. in 2023), extends by filling with constant value 
+
+    Adter end of data, extends by filling with constant value 
+
+    Inputs
+
+
+    Returns 
 
     """
     
@@ -897,10 +923,10 @@ def preprocess_all_country_data(
     ):
 
     # metadata from worldbank, unwpp and availability of cohort data - filters already countries 
-    df_metadata =  load_country_metadata(filepath_world_bank = filepath_world_bank_meta,
+    df_metadata =  load_country_metadata(filepath_world_bank = filepath_world_bank,
                                         filepath_lookuptable=filepath_lookuptable,
                                         data_source_cohorts = data_source_cohorts,
-                                        worldbank_filter=True) 
+                                        worldbank_filter=worldbank_filter) 
 
 
     # load life expectancy data and clean 
@@ -1009,14 +1035,14 @@ def get_gridscale_demographics(
     da_cohort_size,
     startyear=2000,
     endyear=2005,
-    chunksize=100
+    #chunksize=100
 ):
     """
     To do: make a wrapper function that runs all previous and does this
     make a function that does this just for one country/region if one only wants a certain country? - doing it ! to clean up nicer later 
     """
 
-    da_pop = da_population.sel(time=slice(startyear, endyear)) #.chunk({'time': chunksize, 'lat': chunksize, 'lon': chunksize})  # check optimal chunking sizes and whether to chunk here or above,myabe here? 
+    da_pop = da_population.sel(time=slice(startyear, endyear))   # TODO: check optimal chunking sizes and whether to chunk here or above,myabe here?  #.chunk({'time': chunksize, 'lat': chunksize, 'lon': chunksize})
     
     # Initialize the combined demographics DataArray
     da_pop_demographics = None
@@ -1037,11 +1063,11 @@ def get_gridscale_demographics(
         iso = df_countries_matched[df_countries_matched['country_wcde']==country]['iso3_frac'].values[0]
     
         # if this isocode is in the mask file 
-        if iso in da_countrymasks['variable']: # do this in a slightly more intelligent way??? similar to what i was doing b4 with the dataframs, instead of if
+        if iso in da_countrymasks['variable']: # TODO: do this in a slightly more intelligent way??? similar to what i was doing b4 with the dataframs, instead of if
         
             # Get cohort sizes of the country
             if da_cohort_size.country.values.size > 1:
-                da_smple_cht = da_cohort_size.sel(country=country).sel(time=slice(startyear, endyear)) #.chunk({'time': 10, 'ages': 10})
+                da_smple_cht = da_cohort_size.sel(country=country).sel(time=slice(startyear, endyear)) 
             else:
                 da_smple_cht = da_cohort_size.sel(time=slice(startyear, endyear)) 
 
@@ -1058,9 +1084,11 @@ def get_gridscale_demographics(
         
             # Explicitly clear intermediate variables to free up memory
             del iso, da_smple_cht, da_smple_cht_prp, pop_country
+        
         else:
-            print('**iso not in mask')
-            pass
+
+            print(f'**iso {iso} not in mask')
+
     
     da_pop_demographics = da_pop_demographics.compute()
     
@@ -1076,7 +1104,7 @@ def population_demographics_gridscale_global(
     endyear=2005,
     ssp=2,
     urbanrural=False,
-    chunksize=100
+    #chunksize=100
 ):
     """
     Wrapper function to run previous functions choosing isimip round and ssp, for filepaths see component functions. 
@@ -1093,7 +1121,7 @@ def population_demographics_gridscale_global(
 
     
     with HiddenPrints():
-        df_countries_matched = match_country_names_all_mask_frac();
+        df_countries_matched = match_country_names_all_mask_frac()
 
         df_cohort_sizes, ages, years = load_cohort_sizes(ssp=ssp)
 
@@ -1117,7 +1145,7 @@ def population_demographics_gridscale_global(
                                                  df_countries_matched,
                                                  da_cohort_size,
                                                  startyear=startyear,
-                                                 endyear=endyear);
+                                                 endyear=endyear)
 
 
 
