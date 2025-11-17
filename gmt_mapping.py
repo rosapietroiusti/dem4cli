@@ -13,17 +13,10 @@ To do
 import numpy as np
 import xarray as xr
 import pandas as pd
-import geopandas as gpd
-import pickle as pk
 from scipy import interpolate
-import regionmask
-import glob
-import os
 from copy import deepcopy as cp
-import numpy as np
 import dask
 from dask.diagnostics import progress
-import statsmodels.api as sm
 
 from ._settings import *
 
@@ -264,7 +257,7 @@ def load_GMT(
     # ---------------------------------------------------------- #
 
     # wim's original scenarios; use historical obs years from here, 1960-1999, but replace with ar6 trajectories from 2000
-    df_GMT_SR15 = pd.read_excel(dir_temperature_trajectories+'/temperature-trajectories_SR15/GMT_50pc_manualoutput_4pathways.xlsx', header=1);
+    df_GMT_SR15 = pd.read_excel(dir_temperature_trajectories+'/temperature-trajectories_SR15/GMT_50pc_manualoutput_4pathways.xlsx', header=1)
     df_GMT_SR15 = df_GMT_SR15.iloc[:4,1:].transpose().rename(columns={
         0 : 'IPCCSR15_IMAGE 3.0.1_SSP1-26_GAS',
         1 : 'IPCCSR15_MESSAGE-GLOBIOM 1.0_ADVANCE_INDC_GAS',
@@ -572,8 +565,8 @@ def calc_model_gmst(experiments=scenarios,
 
     dsets_ = dask.compute(dict(dsets))[0]
 
-    expt_da = xr.DataArray(expts, dims='experiment_id', name='experiment_id',
-                       coords={'experiment_id': expts})
+    expt_da = xr.DataArray(experiments, dims='experiment_id', name='experiment_id',
+                       coords={'experiment_id': experiments})
 
     dsets_aligned = {}
 
@@ -595,7 +588,7 @@ def calc_model_gmst(experiments=scenarios,
                                 .swap_dims({'time': 'year'})
                                 .drop('time')
                                 .coarsen(year=12).mean(skipna=True)
-                        for expt in expts]
+                        for expt in experiments]
         
         # align everything 
         dsets_aligned[k] = xr.concat(dsets_ann_mean, join='outer',

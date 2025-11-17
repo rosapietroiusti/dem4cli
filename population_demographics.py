@@ -89,7 +89,7 @@ def load_country_metadata(
     else:
         raise ValueError("data_source_cohorts must be WCDE or UNWPP2024")
 
-    df_overlap = df_overlap[["SSP name", "WPP name", "ISO numeric", "ISO alpha-3"]]
+    df_overlap = df_overlap[["SSP name", "WPP name", "ISO numeric","ISO alpha-2", "ISO alpha-3"]]
 
 
     if worldbank_filter:
@@ -97,36 +97,32 @@ def load_country_metadata(
         # and have life expectancy and cohort size data
         # 217 with UNWPP cohorts (lose Channel Islands, data available as Jersey/Guernsey)
         # 195 with WCDE
-        
         df_metadata_filtered = df_metadata.merge(
             df_overlap, how='inner', left_on='abbreviation', right_on='ISO alpha-3'
             ).reset_index(drop=True
             ).rename(columns={ 
                 'ISO numeric': 'country_code', 
+                'ISO alpha-2': 'ISO2',
                 'WPP name':'name' })
-
-        df_metadata_filtered = df_metadata_filtered[[
-            'abbreviation', 'region', 'incomegroup', 'country_code', 'SSP name', 'name'  
-             ]]
 
     else: 
         # include all countries that have all demographic data even if not in WB categorization
         # 236 with UNWPP
         # 201 with WCDE
-
         df_metadata_filtered = df_metadata.merge(
             df_overlap, how='right', left_on='abbreviation', right_on='ISO alpha-3'
             ).reset_index(drop=True
             ).drop(columns='abbreviation'
             ).rename(columns={
                 'ISO alpha-3':'abbreviation', 
+                'ISO alpha-2': 'ISO2',
                 'ISO numeric': 'country_code', 
                 'WPP name' : 'name' })
 
-        df_metadata_filtered = df_metadata_filtered[[
-            'abbreviation', 'region', 'incomegroup', 'country_code', 'SSP name', 'name'   
-            ]]
-
+    # get only useful columns
+    df_metadata_filtered = df_metadata_filtered[[
+        'abbreviation',  'ISO2', 'region', 'incomegroup', 'country_code', 'SSP name', 'name'   
+        ]]
         
     return df_metadata_filtered.set_index('name', drop=False)
 
@@ -750,7 +746,7 @@ def load_countrymask(
             box_crop = box(lonmin, latmin, lonmax, latmax)
             gdf_country_borders = gpd.clip(gdf_country_borders, box_crop)
 
-            da_population = cut_to_region(da_population, bbox)
+            da_population = cut_to_region(da_population, bbox) # TODO: am i using this??? 
 
         # create regions object and mask object
         countries_regions = regionmask.from_geopandas(
@@ -783,6 +779,99 @@ def load_countrymask(
         return gdf_country_borders, countries_regions, countries_mask, df_countries
 
 
+
+
+
+@timeit
+def load_subnational_mask(
+    filepath_shp=None,
+    da_population=None,
+    bbox=None,
+    dict_keep=None, 
+    dict_drop=None,
+    col_name="NUTS_NAME",
+    col_id= "NUTS_ID",
+    col_country='CNTR_CODE',
+    ):
+    """
+    Load subnational shapefile mask 
+
+    Inputs:
+        dict_keep (dict):       what elements of shapefile to keep, as a dictionary colname:value 
+                                e.g. {'LEVL_CODE': 2, 'CNTR_CODE': 'PT'}
+                                This does an exact match
+        dict_drop (dict):       what elements to drop as a dictionary colname:value
+                                This does a "startswith" match
+
+    Returns:
+
+    """
+
+    def make_shp(filepath_shp, dict_keep=None, dict_drop=None):
+        shp = gpd.read_file(filepath_shp)
+
+        if dict_keep:
+            for key, val in dict_keep.items():
+                vals = [val] if isinstance(val, (str, int)) else val
+                shp = shp[shp[key].isin(vals)]
+
+        if dict_drop:
+            for key, val in dict_drop.items():
+                vals = [val] if isinstance(val, (str, int)) else val
+                shp = shp[~shp[key].str.startswith(tuple(vals))]
+
+        return shp.reset_index(drop=True).to_crs("EPSG:4326")
+    
+    def cut_to_region(da, bbox):
+        # cut to a predefined region
+        latmin, latmax, lonmin, lonmax = bbox
+        if da.lat.values[0] < da.lat.values[-1]:
+            da = da.sel(lat=slice(latmin, latmax), lon=slice(lonmin, lonmax))
+        else:
+            da = da.sel(lat=slice(latmax, latmin), lon=slice(lonmin, lonmax))
+        if "country" in da.dims:
+            # compute which countries have all-NaN/0 inside the bbox and drop them 
+            mask = ~((da.isnull() | (da == 0)).all(dim=("lat","lon")))
+            return da.sel(country=mask)
+        else:
+            return da
+    
+    gdf = make_shp(filepath_shp, dict_keep=dict_keep, dict_drop=dict_drop)
+
+    if bbox:
+        latmin, latmax, lonmin, lonmax = bbox
+        # crop to same area 
+        box_crop = box(lonmin, latmin, lonmax, latmax) # not sure this is necessary?
+        gdf = gpd.clip(gdf, box_crop).reset_index(drop=True)
+        da_population = cut_to_region(da_population, bbox)  # TODO: do i really need this ?? 
+                                                            # it will make mask on grid of da_population, so it needs to be relevant to broader analysis
+                                                            # check if better to force bbox to be provided... or to alternatively not crop da_population 
+
+
+    # create regions object and mask object
+    subnational_regions = regionmask.from_geopandas(
+        gdf, 
+        names=col_name, 
+        abbrevs=col_id, 
+        name=col_name
+    )
+
+    subnational_mask = subnational_regions.mask(da_population.lon, da_population.lat)
+
+    gdf = gdf.loc[:,[col_id, col_country, col_name, 'geometry']].rename(
+            columns={col_id:'id', col_name:'name', col_country:'country'}
+            ).set_index('id', drop=False)
+
+    # calc population in 2025 from gridded data, to check if some regions are unresolved at the resolution
+    gdf['population'] = np.nan
+    for idx in gdf['id']:
+        gdf.loc[idx,'population'] = da_population.sel(time=2025
+        ).where(subnational_mask==subnational_regions.map_keys(idx), drop=True
+        ).sum().values
+
+    # possible to add automatic dropping of empty regions
+
+    return gdf, subnational_regions, subnational_mask
 
 
 
@@ -1094,59 +1183,3 @@ def get_gridscale_demographics(
     
     return da_pop_demographics
 
-
-
-
-
-
-def population_demographics_gridscale_global(
-    startyear=2000,
-    endyear=2005,
-    ssp=2,
-    urbanrural=False,
-    #chunksize=100
-):
-    """
-    Wrapper function to run previous functions choosing isimip round and ssp, for filepaths see component functions. 
-    """
-
-    class HiddenPrints:
-        def __enter__(self):
-            self._original_stdout = sys.stdout
-            sys.stdout = open(os.devnull, 'w')
-    
-        def __exit__(self, exc_type, exc_val, exc_tb):
-            sys.stdout.close()
-            sys.stdout = self._original_stdout
-
-    
-    with HiddenPrints():
-        df_countries_matched = match_country_names_all_mask_frac()
-
-        df_cohort_sizes, ages, years = load_cohort_sizes(ssp=ssp)
-
-        da_population = load_population(ssp=ssp,
-                                    startyear=startyear,
-                                    endyear=endyear,
-                                   urbanrural=urbanrural)
-
-    print('loading country masks')
-    da_countrymasks = load_countrymasks_fillcoasts() #.chunk({'lat': chunksize, 'lon': chunksize})
-
-    print('interpolating cohort sizes per country')
-    with HiddenPrints():
-        da_cohort_size = interpolate_cohortsize_countries(df_cohort_sizes,
-                                                 ages,
-                                                 years)
-    print('calculating gridscale demographics')
-    with HiddenPrints():
-        da_pop_demographics = get_gridscale_demographics(da_population,
-                                                 da_countrymasks,
-                                                 df_countries_matched,
-                                                 da_cohort_size,
-                                                 startyear=startyear,
-                                                 endyear=endyear)
-
-
-
-    return da_pop_demographics
