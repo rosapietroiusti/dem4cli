@@ -789,7 +789,7 @@ def load_subnational_mask(
     bbox=None,
     dict_keep=None, 
     dict_drop=None,
-    col_name="NUTS_NAME",
+    col_name="NAME_LATN",
     col_id= "NUTS_ID",
     col_country='CNTR_CODE',
     ):
@@ -860,7 +860,7 @@ def load_subnational_mask(
 
     gdf = gdf.loc[:,[col_id, col_country, col_name, 'geometry']].rename(
             columns={col_id:'id', col_name:'name', col_country:'country'}
-            ).set_index('id', drop=False)
+            ).set_index('id', drop=False).rename_axis(None)
 
     # calc population in 2025 from gridded data, to check if some regions are unresolved at the resolution
     gdf['population'] = np.nan

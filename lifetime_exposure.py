@@ -334,20 +334,14 @@ def calc_weighted_fldmean(
             da_masked = da.where(mask)
 
         da_weighted_fldmean = weighted_mean(da_masked, weights, areaweighted)
+
+        del da_masked
+
     else:
         # if already masked outside of the fxn 
         da_weighted_fldmean = weighted_mean(da, weights, areaweighted)
 
-
-    del da_masked
-
     return da_weighted_fldmean
-
-
-
-    # version 2 ! 
-
-
 
 
 
@@ -823,7 +817,7 @@ def calc_lifetime_exposure(
         )
 
     data_vars['le_percountry_perrun_strj'] = (
-            ['run', 'region', 'birth_year', 'GMT'],
+            ['run', 'country', 'birth_year', 'GMT'],
             np.full(shape_strj, np.nan)
     )
 
@@ -1263,7 +1257,7 @@ def calc_lifetime_exposure_subnational(
 
             # historical + RCP simulations
             d_exposure_perregion[region] = calc_weighted_fldmean( 
-                da_AFA,
+                da_masked, # da_AFA
                 subnational_mask, 
                 ind_region,
                 weights=da_population, 
@@ -1271,17 +1265,15 @@ def calc_lifetime_exposure_subnational(
                 mask=False
             )
 
-            # TODO: maybe indeed faster to crop da_population to extent of gdf_subnational, if I am running this separately
-            # because the masking is very slow 
-
-
-        print(f'Converting to dataframe                              ', end='\r')
+        print(f'Converting to dataframe                              ', end='\r') 
         
 
         # Convert dict to dataframe for vectorizing and integrate exposures   
         # avg population-weighted exposure per country per year
         frame = {k:v.values for k,v in d_exposure_perregion.items()}
         df_exposure_perregion = pd.DataFrame(frame,index=year_range)  
+
+        # TODO: this step is very slow! can try vectorizing!
 
         print('🟢 Population-Weighted Spatial Average of the Exposure for all regions computed')
 
@@ -1461,28 +1453,17 @@ def calc_landfraction_exposed_mmm(
     var_suffixes = GMT_extra_trajectories_names+['strj'] 
 
     for suffix in var_suffixes:
-        mmm = ds_perrun[f'landfrac_peryear_per{unit}_{suffix}'].mean(dim='run', skipna=True)
+
+        var_name = f'landfrac_peryear_per{unit}_{suffix}'
+
+        # aggregate 
+        mmm = ds_perrun[var_name].mean(dim='run', skipna=True)
         mmm_sm = mmm.rolling(time_ind=10, center=True, min_periods=1).mean()
-        std = ds_perrun[f'landfrac_peryear_per{unit}_{suffix}'].std(dim='run', skipna=True)
+        std = ds_perrun[var_name].std(dim='run', skipna=True)
         std_sm = std.rolling(time_ind=10, center=True, min_periods=1).mean()
-        lqntl = ds_perrun[f'landfrac_peryear_per{unit}_{suffix}'].quantile(
-            q=0.25,
-            dim='run',
-            method='inverted_cdf',
-            skipna=True
-        )
-        uqntl = ds_perrun[f'landfrac_peryear_per{unit}_{suffix}'].quantile(
-            q=0.75,
-            dim='run',
-            method='inverted_cdf',
-            skipna=True
-        )
-        median = ds_perrun[f'landfrac_peryear_per{unit}_{suffix}'].quantile(
-            q=0.5,
-            dim='run',
-            method='inverted_cdf',
-            skipna=True
-        )
+        lqntl = ds_perrun[var_name].reduce(np.nanpercentile, dim='run', q=25, method='linear')
+        uqntl = ds_perrun[var_name].reduce(np.nanpercentile, dim='run', q=75, method='linear')
+        median = ds_perrun[var_name].median(dim='run')
         median_sm = median.rolling(time_ind=10, center=True, min_periods=1).mean()
 
         other_dims = set(ds_perrun.dims) - {'run', 'GMT'}
@@ -1501,7 +1482,7 @@ def calc_landfraction_exposed_mmm(
 
         # TODO: replace med,lq,uq with a single var with a quantile dimension?? and dont drop the quantile dimension
 
-    return ds_perrun.reset_coords().drop_vars('quantile')
+    return ds_perrun.reset_coords()
 
 
 
@@ -1545,24 +1526,9 @@ def calc_lifetime_exposure_mmm(
 
         mmm = ds_perrun[var_name].mean(dim='run', skipna=True)
         std = ds_perrun[var_name].std(dim='run', skipna=True)
-        lqntl = ds_perrun[var_name].quantile(
-            q=0.25,
-            dim='run',
-            method='inverted_cdf',
-            skipna=True
-        )
-        uqntl = ds_perrun[var_name].quantile(
-            q=0.75,
-            dim='run',
-            method='inverted_cdf',
-            skipna=True
-        )
-        median = ds_perrun[var_name].quantile(
-            q=0.5,
-            dim='run',
-            method='inverted_cdf',
-            skipna=True
-        )
+        lqntl = ds_perrun[var_name].reduce(np.nanpercentile, dim='run', q=25, method='linear')
+        uqntl = ds_perrun[var_name].reduce(np.nanpercentile, dim='run', q=75, method='linear')
+        median = ds_perrun[var_name].median(dim='run')
 
         # number of valid remapped trajectories 
         other_dims = set(ds_perrun.dims) - {'run', 'GMT'}
@@ -1573,28 +1539,29 @@ def calc_lifetime_exposure_mmm(
         EMF = ds_perrun[var_name] / ds_perrun[var_name].sel(birth_year=year_ref)
 
         mmm_EMF = EMF.mean(dim='run', skipna=True)
-        lqntl_EMF = EMF.quantile(
-            q=0.25,
-            dim='run',
-            method='inverted_cdf',
-            skipna=True
-        )
-        uqntl_EMF = EMF.quantile(
-            q=0.75,
-            dim='run',
-            method='inverted_cdf',
-            skipna=True
-        )
-        median_EMF = EMF.quantile(
-            q=0.5,
-            dim='run',
-            method='inverted_cdf',
-            skipna=True
-        )
-
-        # TODO: make a quantile dim instead of all these extra variables !! you can group med,lq,uq 
-        # NOTE: this one doesnt have the _sm variables! 
-
+        # lqntl_EMF = EMF.quantile(
+        #     q=0.25,
+        #     dim='run',
+        #     method='inverted_cdf',
+        #     skipna=True
+        # )
+        # uqntl_EMF = EMF.quantile(
+        #     q=0.75,
+        #     dim='run',
+        #     method='inverted_cdf',
+        #     skipna=True
+        # )
+        # median_EMF = EMF.quantile(
+        #     q=0.5,
+        #     dim='run',
+        #     method='inverted_cdf',
+        #     skipna=True
+        # )
+        
+        # method coherent with standard pandas/xarray behaviour
+        lqntl_EMF = EMF.reduce(np.nanpercentile, dim='run', q=25, method='linear')
+        uqntl_EMF = EMF.reduce(np.nanpercentile, dim='run', q=75, method='linear')
+        median_EMF = EMF.median(dim='run')
 
         ds_perrun[f'mmm_{suffix}'] = mmm
         ds_perrun[f'std_{suffix}'] = std
@@ -1607,8 +1574,29 @@ def calc_lifetime_exposure_mmm(
         ds_perrun[f'uqntl_EMF_{suffix}'] = uqntl_EMF
         ds_perrun[f'median_EMF_{suffix}'] = median_EMF
 
-    return ds_perrun.reset_coords().drop_vars('quantile')
+    return ds_perrun.reset_coords()
 
 
+
+
+
+#%%
+
+
+def calc_lifetime_exposure_map(
+
+):
+
+# da_AFA load
+
+# remap based on d_climate_data_meta
+
+# aggregate for certain birthyears / match based on shapefile - maybe select just one country at a time? Or somehow do for all Europe/all countries???
+
+# aggregate across models
+
+# plot per pixel lifetime exposure, if there is a person there, as abs n years or as % lifetime
+
+    pass
 
 
