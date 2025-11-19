@@ -78,7 +78,6 @@ def load_climate_data(
     df_GMT_strj,                # stylized trajectories
     GMT_extra_trajectories = None,
     GMT_extra_trajectories_names = None,
-    #climatedata_dir = None,     # structure should be : climatedata_dir/scenario/model/'*{model}*{extreme}.nc
     filepath_model_gmst = os.path.join(data_dir, 'gmst-models/gmst_models_1850_2100_fwi.csv'),
     scenarios = None,
     rolling_window=21,
@@ -139,6 +138,8 @@ def load_climate_data(
     scenarios = [s for s in scenarios if s not in ('historical', 'hist')]
 
     # loop over extremes e.g. FWId95
+    # this is not necessary actually!!! same models same remapping recipe!! 
+    #TODO: could delete this.... 
     for extreme in extremes:
 
         print(f'Processing for {extreme}')
@@ -354,7 +355,8 @@ def load_climate_data_array(climatedata_dir,
                     extreme,
                     year_start,
                     year_end,
-                    bbox=None
+                    bbox=None,
+                    smoothing_window=None
                     ):
     """" Load climate data, concat historical + rcp, clean data. Assumes there is only one variable of interest"""
 
@@ -402,6 +404,9 @@ def load_climate_data_array(climatedata_dir,
         for year in range(da_AFA.time.max().values+1,year_end+1): 
             da_AFA = xr.concat([da_AFA,da_AFA_lastyear.assign_coords(time = [year])], dim='time')
 
+    # to take a more RIME-like approach - smooth the climate data also - no natural variability only forced signal - TESTING
+    if smoothing_window:
+        da_AFA = da_AFA.rolling(time=smoothing_window, center=True, min_periods=1).mean()
 
     return da_AFA
 
@@ -428,7 +433,8 @@ def calc_landfraction_exposed(
     weights=None,
     areaweighted=True,
     convert_to_binary=False,  
-    convert_to_binary_threshold=0,    
+    convert_to_binary_threshold=0,  
+    smoothing_window=None  # change this arg name in load_climate data 
 ):
     """
     Calc area-weighted average of your input hazard dataset per country and per region. 
@@ -567,7 +573,8 @@ def calc_landfraction_exposed(
                     extreme,
                     year_start,
                     year_end,
-                    bbox
+                    bbox,
+                    smoothing_window
                     )
         
         # align for masking if there are minor differences
@@ -702,6 +709,7 @@ def calc_lifetime_exposure(
     year_start=1950,
     year_end=2119,
     bbox=None,
+    smoothing_window=None,
 ):
 
     def calc_life_exposure(
@@ -850,7 +858,8 @@ def calc_lifetime_exposure(
             extreme,
             year_start,
             year_end,
-            bbox
+            bbox,
+            smoothing_window
             )
         
         # align for masking if there are minor differences
@@ -1102,6 +1111,7 @@ def calc_lifetime_exposure_subnational(
     year_start=1950,
     year_end=2119,
     bbox=None,
+    smoothing_window=None,
 ):
 
     def calc_life_exposure(
@@ -1224,7 +1234,8 @@ def calc_lifetime_exposure_subnational(
             extreme,
             year_start,
             year_end,
-            bbox
+            bbox,
+            smoothing_window
             )
         
         # align for masking if there are minor differences
