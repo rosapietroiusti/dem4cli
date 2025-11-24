@@ -456,6 +456,8 @@ def calc_landfraction_exposed(
 
         convert_to_binary_threshold (int)       modify the minimum number of days to convert to binary
 
+        smoothing_window (int)                  window to smooth impact data, default:None
+
     Returns:
         ds_lfe_perregion_perrun (ds):       per region, per model year or remapped year, 
                                             per scenario the area-weighted fraction of region exposed 
