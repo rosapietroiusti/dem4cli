@@ -52,8 +52,8 @@ flags['countrymask'] = 'shapefile'
                         # 'fractional_mask' (not fully implemented Lexp) - TO DEVELOP
 
 script_dir = os.path.abspath( os.path.dirname( __file__ ) )
-data_dir = os.path.join(script_dir, 'data')
-
+#data_dir = os.path.join(script_dir, 'data') #original from Rosa (needs data to be in my folder)
+data_dir = '/data/brussel/vo/000/bvo00012/shared_subdir/vsc10419/dem4cli/data_dem4cli/data'
 
 # Data paths for different versions
 

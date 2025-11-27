@@ -438,7 +438,7 @@ def calc_landfraction_exposed(
 ):
     """
     Calc area-weighted average of your input hazard dataset per country and per region. 
-    Results are given per origina RCP model years and after GMT-remapping 
+    Results are given per original RCP model years and after GMT-remapping 
     year-to-year based on GMT_labels and GMT_extra_trajectories, 
     with the remapping recipe defined in d_climate_data_meta. 
 
