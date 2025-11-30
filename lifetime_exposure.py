@@ -384,8 +384,14 @@ def load_climate_data_array(climatedata_dir,
                 lat=slice(latmax, latmin), lon=slice(lonmin, lonmax), time=slice(year_start, year_end)
                 )
 
-    filepath_hist = glob.glob(os.path.join(climatedata_dir, 'historical', model, f'*{model}*{extreme}.nc'))[0]
-    filepath_rcp = glob.glob(os.path.join(climatedata_dir, scenario, model, f'*{model}*{extreme}.nc'))[0]
+
+    # QL: This will need to be changed!! It is now hard-coded.
+    #filepath_hist = glob.glob(os.path.join(climatedata_dir, 'historical', model, f'*{model}*{extreme}.nc'))[0]
+    #filepath_rcp = glob.glob(os.path.join(climatedata_dir, scenario, model, f'*{model}*{extreme}.nc'))[0]
+
+    filepath_hist = glob.glob(os.path.join(climatedata_dir, 'heatwavedarea/hwmid99/hwmid99_hadgem2-es_historical_heatwavedarea_global_annual_landarea_1861_2005.nc4'))[0]
+    filepath_rcp = glob.glob(os.path.join(climatedata_dir, 'heatwavedarea/hwmid99/hwmid99_hadgem2-es_rcp60_heatwavedarea_global_annual_landarea_2006_2099.nc4'))[0]
+
     print(f'Loading {filepath_hist}')
     print(f'Loading {filepath_rcp}')
     da_AFA = xr.open_mfdataset(
