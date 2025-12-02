@@ -258,9 +258,6 @@ def load_climate_data(
                 # update counter
                 i += 1
 
-                # what are you doing with da_AFA here??? why do you need to load the data? if not using 
-                # was getting saved as pickle - could do elsewhere, or output in fxn return ?? 
-
     return d_climate_data_meta 
 
 
@@ -424,7 +421,7 @@ def calc_landfraction_exposed(
     df_countries, 
     countries_regions, 
     countries_mask, 
-    climatedata_dir,
+    climatedata_dir, # structure should be : climatedata_dir/scenario/model/'*{model}*{extreme}.nc
     GMT_labels = None , 
     GMT_extra_trajectories_names=None,
     year_start=1950,
@@ -700,7 +697,7 @@ def calc_lifetime_exposure(
     df_countries, 
     countries_regions, 
     countries_mask, 
-    climatedata_dir,
+    climatedata_dir, # structure should be : climatedata_dir/scenario/model/'*{model}*{extreme}.nc
     da_population, 
     df_life_expectancy_5,
     da_cohort_size,
@@ -1156,6 +1153,13 @@ def calc_lifetime_exposure_subnational(
 
         country_code = gdf_subnational.loc[gdf_subnational['id']==region]['country'].values[0]
 
+        # The European Commission generally uses ISO 3166-1 alpha-2 codes with two exceptions
+        # EL (not GR) is used to represent Greece, and UK (not GB) is used to represent the United Kingdom
+        if country_code == 'EL':
+            country_code = 'GR'
+        elif country_code == 'UK':
+            country_code = 'GB'
+
         country = df_countries.loc[df_countries['ISO2']==country_code]['name'].values[0]
 
         return country
@@ -1552,6 +1556,7 @@ def calc_lifetime_exposure_mmm(
         EMF = ds_perrun[var_name] / ds_perrun[var_name].sel(birth_year=year_ref)
 
         mmm_EMF = EMF.mean(dim='run', skipna=True)
+        std_EMF = EMF.std(dim='run', skipna=True)
         # lqntl_EMF = EMF.quantile(
         #     q=0.25,
         #     dim='run',
@@ -1583,6 +1588,7 @@ def calc_lifetime_exposure_mmm(
         ds_perrun[f'median_{suffix}'] = median
         ds_perrun[f'sample_size_{suffix}'] = sample_size
         ds_perrun[f'mmm_EMF_{suffix}'] = mmm_EMF
+        ds_perrun[f'std_EMF_{suffix}'] = std_EMF
         ds_perrun[f'lqntl_EMF_{suffix}'] = lqntl_EMF
         ds_perrun[f'uqntl_EMF_{suffix}'] = uqntl_EMF
         ds_perrun[f'median_EMF_{suffix}'] = median_EMF

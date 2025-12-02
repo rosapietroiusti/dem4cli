@@ -1023,7 +1023,7 @@ def preprocess_all_country_data(
     # go from 'period' to 'cohort' life expectancy
     df_life_expectancy_5 = get_life_expectancies(df_unwpp,
                                             start_birthyear=start_birthyear,
-                                            end_birthyear=end_birthyear) 
+                                            end_birthyear=end_birthyear)
 
 
     # calculate end year as last birth year + maximum life expectancy
@@ -1062,8 +1062,8 @@ def preprocess_all_country_data(
                                         data_source_countrymask = data_source_countrymask,
                                         df_metadata=df_metadata,
                                         da_population = da_population,
-                                        fillcoast=fillcoast, # fill coastal pixels to not lose coastal pops 
-                                        fix_smallislands=fix_smallislands, # done in preprocessed input files for 0.5, not for 0.1 
+                                        fillcoast=fillcoast, # fill coastal pixels to not lose coastal pops
+                                        fix_smallislands=fix_smallislands, # done in preprocessed input files for 0.5, not for 0.1
                                         bbox=bbox,
                                         filter_countries=filter_countries,
                                         )
@@ -1074,7 +1074,7 @@ def preprocess_all_country_data(
         
         # cohort sizes
         name_cohorts = "name" if data_source_cohorts == "UNWPP2024" else "SSP name"
-        da_cohort_size = da_cohort_size.sel(country=df_countries[name_cohorts].to_list()) # rename the SSP name to the WPP name? 
+        da_cohort_size = da_cohort_size.sel(country=df_countries[name_cohorts].to_list()) # rename the SSP name to the WPP name?
         
         # if cohort sizes are from WCDE rename from SSP name to WPP name
         if data_source_cohorts == 'WCDE':
@@ -1084,11 +1084,11 @@ def preprocess_all_country_data(
             )
 
         # WCDE: in demographic datasets and have world bank region/income info = 195 countries
-                # and shapefile resolved = 180 countries 
-                # and frax mask resolved = 192 countries 
+                # and shapefile resolved = 180 countries
+                # and frax mask resolved = 192 countries
         # UNWPP: in demographic datasets and have world bank region/income info = 217 countries
-                # and shapefile resolved = 183 countries 
-                # and frax mask resolved = 209 countries 
+                # and shapefile resolved = 183 countries
+                # and frax mask resolved = 209 countries
         
 
     # pack country information
