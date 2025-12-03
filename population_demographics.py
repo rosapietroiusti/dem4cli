@@ -851,7 +851,7 @@ def load_subnational_mask(
     # create regions object and mask object
     subnational_regions = regionmask.from_geopandas(
         gdf, 
-        names=col_name, 
+        names=col_id, 
         abbrevs=col_id, 
         name=col_name
     )
