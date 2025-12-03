@@ -455,6 +455,8 @@ def calc_landfraction_exposed(
 
         smoothing_window (int)                  window to smooth impact data, default:None
 
+        bbox (opt)                              latmin, latmax, lonmin, lonmax
+
     Returns:
         ds_lfe_perregion_perrun (ds):       per region, per model year or remapped year, 
                                             per scenario the area-weighted fraction of region exposed 
@@ -711,6 +713,33 @@ def calc_lifetime_exposure(
     smoothing_window=None,
 ):
 
+    """
+        Calc lifetime exposure to your input hazard dataset per country and per region. 
+        Results are given per original RCP model years (optionally with smoothing), as well
+        as after GMT-remapping to match stylized trajectories, with the remapping recipe defined 
+        in d_climate_data_meta (output of load_climate_data)
+
+        Note: This conserved the units of your input dataset i.e. if your units are days
+        the output will be in number of days exposed
+
+        Inputs:
+            GMT_labels (list):                      e.g. df_GMT_strj.columns
+
+            smoothing_window (int)                  window to smooth impact data, default:None (recommended: 21)
+
+            bbox (opt)                              latmin, latmax, lonmin, lonmax
+
+        Returns:
+            ds_le_perregion_perrun (ds):        average lifetime exposure per region, model year or remapped year, 
+                                                scenario and birth year  
+                                                
+            
+            ds_le_percountry_perrun (ds):       average lifetime exposure per country, model year or remapped year, 
+                                                scenario and birth year  
+
+            region_names (list):                region names to understand ds_le_perregion_perrun
+
+    """
     def calc_life_exposure(
         df_exposure,
         df_life_expectancy,
@@ -1263,8 +1292,11 @@ def calc_lifetime_exposure_subnational(
         missing_regions = set(gdf_subnational['id']) - set(df.columns)
         df[list(missing_regions)] = np.nan
 
-        # reorder columns alphabetically
-        df_exposure_perregion = df.reindex(sorted(df.columns), axis=1)
+        # reorder columns alphabetically - no! has to keep same order as when you made original ds
+        #df_exposure_perregion = df.reindex(sorted(df.columns), axis=1)
+        # reorder columns to match original gdf order (important for broadcasting later)
+        df_exposure_perregion = df.reindex(gdf_subnational.id, axis=1)
+
 
         print('🟢 Population-Weighted Spatial Average of the Exposure for all regions computed')
 
@@ -1528,25 +1560,6 @@ def calc_lifetime_exposure_mmm(
 
         mmm_EMF = EMF.mean(dim='run', skipna=True)
         std_EMF = EMF.std(dim='run', skipna=True)
-        # lqntl_EMF = EMF.quantile(
-        #     q=0.25,
-        #     dim='run',
-        #     method='inverted_cdf',
-        #     skipna=True
-        # )
-        # uqntl_EMF = EMF.quantile(
-        #     q=0.75,
-        #     dim='run',
-        #     method='inverted_cdf',
-        #     skipna=True
-        # )
-        # median_EMF = EMF.quantile(
-        #     q=0.5,
-        #     dim='run',
-        #     method='inverted_cdf',
-        #     skipna=True
-        # )
-        
         # method coherent with standard pandas/xarray behaviour
         lqntl_EMF = EMF.reduce(np.nanpercentile, dim='run', q=25, method='linear')
         uqntl_EMF = EMF.reduce(np.nanpercentile, dim='run', q=75, method='linear')
