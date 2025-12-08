@@ -74,12 +74,12 @@ def calc_gmt_anomaly_correction(
 
 def load_climate_data(
     extremes,                   # e.g. "FWI95d"
-    model_names,                # GCMs
+    gcm_names,                # GCMs
     df_GMT_strj,                # stylized trajectories
+    scenarios = None,
     GMT_extra_trajectories = None,
     GMT_extra_trajectories_names = None,
     filepath_model_gmst = os.path.join(data_dir, 'gmst-models/gmst_models_1850_2100_fwi.csv'),
-    scenarios = None,
     rolling_window=21,
     min_periods=11,
     gmt_anomaly_baseline_period = (1850,1900),
@@ -94,7 +94,7 @@ def load_climate_data(
     """ 
     Loads 'recipe' for GMT-remapping climate models to target GMT trajectories. 
 
-    Takes information on model/experiment/ensemble member-specific GMT timseries. If provided, adjusts this to a baseline period, 
+    Takes information on GCM/experiment/ensemble member-specific GMT timseries. If provided, adjusts this to a baseline period, 
     and if provided additionally adds a correction (e.g. if you want to adjust to 1985-2014 but still want anomalies expressed 
     relative to 1850-1900).
     Takes information on target GMT pathways to emulate from df_GMT_strj and optionally extra scenarios. Smooths with indicated rolling
@@ -113,7 +113,7 @@ def load_climate_data(
 
     Returns
         d_climate_data_meta (dict):     Dictionary, each item is one model simulation and single extreme. 
-                                        'extreme', 'model', 'scenario' : (str) information on extreme, GCM and experiment of original simulation
+                                        'extreme', 'gcm', 'scenario' : (str) information on extreme, GCM and experiment of original simulation
                                         'GMT': (df) dataframe with GMT timeseries of original simulation, if provided adjusted to baseline period/correction
                                         'GMT_strj_maxdiff'  : max difference target to original GMT in any remapping attempt
                                         'GMT_strj_valid'    : whether maxdiff is larger than validity threshold and therefore invalid
@@ -144,15 +144,15 @@ def load_climate_data(
 
         print(f'Processing for {extreme}')
         
-        # loop over models e.g. CanESM5
-        for model in model_names: 
+        # loop over gcms e.g. CanESM5
+        for gcm in gcm_names: 
 
             for scenario in scenarios:
 
                 # 1) metadata
                 d_climate_data_meta[i] = {
                     'extreme': extreme,
-                    'model': model,
+                    'gcm': gcm,
                     'scenario': scenario,
                 }
 
@@ -160,9 +160,9 @@ def load_climate_data(
                 # 2) load GMT 
                 df_GMT = pd.read_csv(filepath_model_gmst,index_col=0)
                 df_GMT['year'] = df_GMT['year'].astype(int)
-                modelname = model if model != 'EC-EARTH' else 'EC-Earth3'
-                df_GMT_hist = df_GMT[(df_GMT['experiment_id']=='historical') & (df_GMT['source_id']==modelname)].set_index('year').drop(columns=['experiment_id','source_id']).dropna()
-                df_GMT_rcp = df_GMT[(df_GMT['experiment_id']==scenario) & (df_GMT['source_id']==modelname)].set_index('year').drop(columns=['experiment_id','source_id']).dropna()
+                gcmname = gcm if gcm != 'EC-EARTH' else 'EC-Earth3'
+                df_GMT_hist = df_GMT[(df_GMT['experiment_id']=='historical') & (df_GMT['source_id']==gcmname)].set_index('year').drop(columns=['experiment_id','source_id']).dropna()
+                df_GMT_rcp = df_GMT[(df_GMT['experiment_id']==scenario) & (df_GMT['source_id']==gcmname)].set_index('year').drop(columns=['experiment_id','source_id']).dropna()
 
                 # concatenate historical and future GMT data
                 df_GMT = pd.concat([df_GMT_hist,df_GMT_rcp])
@@ -389,8 +389,15 @@ def load_climate_data_array(climatedata_dir,
     #filepath_hist = glob.glob(os.path.join(climatedata_dir, 'historical', model, f'*{model}*{extreme}.nc'))[0]
     #filepath_rcp = glob.glob(os.path.join(climatedata_dir, scenario, model, f'*{model}*{extreme}.nc'))[0]
 
-    filepath_hist = glob.glob(os.path.join(climatedata_dir, 'heatwavedarea/hwmid99/hwmid99_hadgem2-es_historical_heatwavedarea_global_annual_landarea_1861_2005.nc4'))[0]
-    filepath_rcp = glob.glob(os.path.join(climatedata_dir, 'heatwavedarea/hwmid99/hwmid99_hadgem2-es_rcp60_heatwavedarea_global_annual_landarea_2006_2099.nc4'))[0]
+    data_source = "ISIMIP"
+    project_phase = "isimip2b"
+    #extreme = "heatwavedarea"
+    #model = "hwmid99"
+    gcm = "hadgem2-es"
+    #scenario = "rcp26"
+
+    filepath_hist = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, model.lower(), f'{model.lower()}_{gcm.lower()}_historical*1861_2005.nc4'))[0]
+    filepath_rcp = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, model.lower(), f'{model.lower()}_{gcm.lower()}_{scenario}*2006_2099.nc4'))[0]
 
     print(f'Loading {filepath_hist}')
     print(f'Loading {filepath_rcp}')
