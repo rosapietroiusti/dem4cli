@@ -73,8 +73,11 @@ def calc_gmt_anomaly_correction(
 
 
 def load_climate_data(
+    data_source,
+    project_phase,
     extremes,                   # e.g. "FWI95d"
     gcm_names,                # GCMs
+    impact_model_names,
     df_GMT_strj,                # stylized trajectories
     scenarios = None,
     GMT_extra_trajectories = None,
@@ -134,6 +137,10 @@ def load_climate_data(
     if isinstance(extremes, str):
         extremes = [extremes]
 
+    for key in impact_model_names:
+        if isinstance(impact_model_names[key], str):  
+            impact_model_names[key] = [impact_model_names[key]] 
+
     # remove historical if provided in list of scenarios
     scenarios = [s for s in scenarios if s not in ('historical', 'hist')]
 
@@ -143,123 +150,130 @@ def load_climate_data(
     for extreme in extremes:
 
         print(f'Processing for {extreme}')
+
+        for i_m_name in impact_model_names[extreme]:
+
+            print(f'Processing for {i_m_name}')
         
-        # loop over gcms e.g. CanESM5
-        for gcm in gcm_names: 
+            # loop over gcms e.g. CanESM5
+            for gcm in gcm_names: 
 
-            for scenario in scenarios:
+                for scenario in scenarios:
 
-                # 1) metadata
-                d_climate_data_meta[i] = {
-                    'extreme': extreme,
-                    'gcm': gcm,
-                    'scenario': scenario,
-                }
-
-
-                # 2) load GMT 
-                df_GMT = pd.read_csv(filepath_model_gmst,index_col=0)
-                df_GMT['year'] = df_GMT['year'].astype(int)
-                gcmname = gcm if gcm != 'EC-EARTH' else 'EC-Earth3'
-                df_GMT_hist = df_GMT[(df_GMT['experiment_id']=='historical') & (df_GMT['source_id']==gcmname)].set_index('year').drop(columns=['experiment_id','source_id']).dropna()
-                df_GMT_rcp = df_GMT[(df_GMT['experiment_id']==scenario) & (df_GMT['source_id']==gcmname)].set_index('year').drop(columns=['experiment_id','source_id']).dropna()
-
-                # concatenate historical and future GMT data
-                df_GMT = pd.concat([df_GMT_hist,df_GMT_rcp])
-
-                # convert GMT from absolute values to anomalies - if you use a non 1850-1900 period should provide a gmt_anomaly_correction
-                df_GMT = df_GMT - df_GMT.loc[gmt_anomaly_baseline_period[0] : gmt_anomaly_baseline_period[1]].mean() + gmt_anomaly_correction
+                    # 1) metadata
+                    d_climate_data_meta[i] = {
+                        'data_source': data_source,
+                        'project_phase': project_phase,
+                        'extreme': extreme,
+                        'impact_model': i_m_name,
+                        'gcm': gcm,
+                        'scenario': scenario,
+                    }
 
 
-                # 3) if needed, repeat mean of last 10 years until entire period of interest is covered - NOTE: do you need da_AFA here??? you're not using it in this fxn
-                #if da_AFA.time.max() < year_end: 
-                if df_GMT.index.max() < year_end: 
-                    #da_AFA_lastyear = da_AFA.isel(time=slice(-10, None)).mean(dim='time').expand_dims(dim='time',axis=0)
-                    GMT_lastyear = df_GMT.iloc[-10:,:].mean() # mean of last 10 years to fill time span 
+                    # 2) load GMT 
+                    df_GMT = pd.read_csv(filepath_model_gmst,index_col=0)
+                    df_GMT['year'] = df_GMT['year'].astype(int)
+                    gcmname = gcm if gcm != 'EC-EARTH' else 'EC-Earth3'
+                    df_GMT_hist = df_GMT[(df_GMT['experiment_id']=='historical') & (df_GMT['source_id']==gcmname)].set_index('year').drop(columns=['experiment_id','source_id']).dropna()
+                    df_GMT_rcp = df_GMT[(df_GMT['experiment_id']==scenario) & (df_GMT['source_id']==gcmname)].set_index('year').drop(columns=['experiment_id','source_id']).dropna()
 
-                    for year in range(df_GMT.index.max()+1,year_end+1): 
-                        #da_AFA = xr.concat([da_AFA,da_AFA_lastyear.assign_coords(time = [year])], dim='time')
-                        if len(df_GMT) < 439: # necessary to avoid this filling from 2100-2113 if GMTs already go to 2299
-                            df_GMT = pd.concat([df_GMT,pd.DataFrame(data={'tas':GMT_lastyear['tas']},index=[year])])
+                    # concatenate historical and future GMT data
+                    df_GMT = pd.concat([df_GMT_hist,df_GMT_rcp])
 
-                # retain only period of interest
-                #da_AFA = da_AFA.sel(time=slice(year_start,year_end))
-                df_GMT = df_GMT.loc[year_start:year_end,:]
+                    # convert GMT from absolute values to anomalies - if you use a non 1850-1900 period should provide a gmt_anomaly_correction
+                    df_GMT = df_GMT - df_GMT.loc[gmt_anomaly_baseline_period[0] : gmt_anomaly_baseline_period[1]].mean() + gmt_anomaly_correction
 
-                # rolling mean 
-                df_GMT = df_GMT.rolling(window=rolling_window,min_periods=min_periods,center=True).mean()
 
-                # save GMT in metadatadict
-                d_climate_data_meta[i]['GMT'] = df_GMT
+                    # 3) if needed, repeat mean of last 10 years until entire period of interest is covered - NOTE: do you need da_AFA here??? you're not using it in this fxn
+                    #if da_AFA.time.max() < year_end: 
+                    if df_GMT.index.max() < year_end: 
+                        #da_AFA_lastyear = da_AFA.isel(time=slice(-10, None)).mean(dim='time').expand_dims(dim='time',axis=0)
+                        GMT_lastyear = df_GMT.iloc[-10:,:].mean() # mean of last 10 years to fill time span 
+
+                        for year in range(df_GMT.index.max()+1,year_end+1): 
+                            #da_AFA = xr.concat([da_AFA,da_AFA_lastyear.assign_coords(time = [year])], dim='time')
+                            if len(df_GMT) < 439: # necessary to avoid this filling from 2100-2113 if GMTs already go to 2299
+                                df_GMT = pd.concat([df_GMT,pd.DataFrame(data={'tas':GMT_lastyear['tas']},index=[year])])
+
+                    # retain only period of interest
+                    #da_AFA = da_AFA.sel(time=slice(year_start,year_end))
+                    df_GMT = df_GMT.loc[year_start:year_end,:]
+
+                    # rolling mean 
+                    df_GMT = df_GMT.rolling(window=rolling_window,min_periods=min_periods,center=True).mean()
+
+                    # save GMT in metadatadict
+                    d_climate_data_meta[i]['GMT'] = df_GMT
                 
-                # 4) run GMT mapping recipe  for stylized trajectories 
+                    # 4) run GMT mapping recipe  for stylized trajectories 
 
-                # --------------------------------------------------------- #
-                # Step 1: Compute the minimum absolute difference (distance)
-                # between the ISIMIP GMT trajectory (d_isimip_meta[i]['GMT'])
-                # and each reference GMT trajectory (e.g. 1.5°C, 2.0°C, NDC…).
-                # This tells us "how close" the ISIMIP GMT is to the target GMT.
-                # --------------------------------------------------------- #
+                    # --------------------------------------------------------- #
+                    # Step 1: Compute the minimum absolute difference (distance)
+                    # between the ISIMIP GMT trajectory (d_isimip_meta[i]['GMT'])
+                    # and each reference GMT trajectory (e.g. 1.5°C, 2.0°C, NDC…).
+                    # This tells us "how close" the ISIMIP GMT is to the target GMT.
+                    # --------------------------------------------------------- #
 
-                # --------------------------------------------------------- #
-                # Step 2: Get the indices (years) where the ISIMIP GMT is   #
-                # closest to the reference GMT trajectories.                #
-                # (argmin returns the index of the minimum distance).       #
-                # --------------------------------------------------------- #
+                    # --------------------------------------------------------- #
+                    # Step 2: Get the indices (years) where the ISIMIP GMT is   #
+                    # closest to the reference GMT trajectories.                #
+                    # (argmin returns the index of the minimum distance).       #
+                    # --------------------------------------------------------- #
 
-                # ----------------------------------------------------------- #
-                # Step 3: Store the maximum difference (worst case distance)  #
-                # between ISIMIP GMT and each reference trajectory.           #
-                # This allows checking whether the ISIMIP curve ever deviates #
-                # too much from the reference.                                #
-                # ----------------------------------------------------------- #
+                    # ----------------------------------------------------------- #
+                    # Step 3: Store the maximum difference (worst case distance)  #
+                    # between ISIMIP GMT and each reference trajectory.           #
+                    # This allows checking whether the ISIMIP curve ever deviates #
+                    # too much from the reference.                                #
+                    # ----------------------------------------------------------- #
 
-                # ------------------------------------------------------------ #
-                # Step 4: Define validity flags (True/False).                  #
-                # A trajectory is considered "valid" if the maximum difference #
-                # never exceeds a chosen threshold (RCP2GMT_maxdiff_threshold) #
-                # ------------------------------------------------------------ #
+                    # ------------------------------------------------------------ #
+                    # Step 4: Define validity flags (True/False).                  #
+                    # A trajectory is considered "valid" if the maximum difference #
+                    # never exceeds a chosen threshold (RCP2GMT_maxdiff_threshold) #
+                    # ------------------------------------------------------------ #
 
-                # ---------------------------------------------------------------- #
-                # Step 5: Save the indices of the years where the GMT              #
-                # trajectory is closest to each target. This allows later          #
-                # remapping for each trajectory                                    #
-                # ---------------------------------------------------------------- #
+                    # ---------------------------------------------------------------- #
+                    # Step 5: Save the indices of the years where the GMT              #
+                    # trajectory is closest to each target. This allows later          #
+                    # remapping for each trajectory                                    #
+                    # ---------------------------------------------------------------- #
 
-                # do this for stylized trajectories
-                d_climate_data_meta[i]['GMT_strj_maxdiff'] = np.empty_like(np.arange(len(df_GMT_strj.columns)))
-                d_climate_data_meta[i]['GMT_strj_valid'] = np.empty_like(np.arange(len(df_GMT_strj.columns)))
-                d_climate_data_meta[i]['ind_RCP2GMT_strj'] = np.empty_like(df_GMT_strj.values)
+                    # do this for stylized trajectories
+                    d_climate_data_meta[i]['GMT_strj_maxdiff'] = np.empty_like(np.arange(len(df_GMT_strj.columns)))
+                    d_climate_data_meta[i]['GMT_strj_valid'] = np.empty_like(np.arange(len(df_GMT_strj.columns)))
+                    d_climate_data_meta[i]['ind_RCP2GMT_strj'] = np.empty_like(df_GMT_strj.values)
                 
-                # loop over each trajectory 
-                for step in range(len(df_GMT_strj.columns)):
-                    RCP2GMT_diff = np.min(np.abs(d_climate_data_meta[i]['GMT'].values - df_GMT_strj.iloc[:,step].values.transpose()), axis=0)
-                    d_climate_data_meta[i]['ind_RCP2GMT_strj'][:,step] = np.argmin(np.abs(d_climate_data_meta[i]['GMT'].values - df_GMT_strj.iloc[:,step].values.transpose()), axis=0)
-                    d_climate_data_meta[i]['GMT_strj_maxdiff'][step] = np.nanmax(RCP2GMT_diff)
-                    d_climate_data_meta[i]['GMT_strj_valid'][step] = np.nanmax(RCP2GMT_diff) < max_diff_valid
+                    # loop over each trajectory 
+                    for step in range(len(df_GMT_strj.columns)):
+                        RCP2GMT_diff = np.min(np.abs(d_climate_data_meta[i]['GMT'].values - df_GMT_strj.iloc[:,step].values.transpose()), axis=0)
+                        d_climate_data_meta[i]['ind_RCP2GMT_strj'][:,step] = np.argmin(np.abs(d_climate_data_meta[i]['GMT'].values - df_GMT_strj.iloc[:,step].values.transpose()), axis=0)
+                        d_climate_data_meta[i]['GMT_strj_maxdiff'][step] = np.nanmax(RCP2GMT_diff)
+                        d_climate_data_meta[i]['GMT_strj_valid'][step] = np.nanmax(RCP2GMT_diff) < max_diff_valid
                     
-                d_climate_data_meta[i]['ind_RCP2GMT_strj'] = d_climate_data_meta[i]['ind_RCP2GMT_strj'].astype(int)
+                    d_climate_data_meta[i]['ind_RCP2GMT_strj'] = d_climate_data_meta[i]['ind_RCP2GMT_strj'].astype(int)
 
                 
-                # do for any extra trajectories - each one should be a df with a single column (i.e. a single pathway)
-                if GMT_extra_trajectories:
+                    # do for any extra trajectories - each one should be a df with a single column (i.e. a single pathway)
+                    if GMT_extra_trajectories:
 
-                    if isinstance(GMT_extra_trajectories, str):
-                        GMT_extra_trajectories = [GMT_extra_trajectories]
+                        if isinstance(GMT_extra_trajectories, str):
+                            GMT_extra_trajectories = [GMT_extra_trajectories]
 
-                    for df_traj, name in zip(GMT_extra_trajectories,GMT_extra_trajectories_names ): 
-                        RCP2GMT_diff = np.min(np.abs(d_climate_data_meta[i]['GMT'].values - df_traj.values.transpose()), axis=0)
-                        ind_RCP2GMT= np.argmin(np.abs(d_climate_data_meta[i]['GMT'].values - df_traj.values.transpose()), axis=0)
-                        d_climate_data_meta[i][f'GMT_{name}_maxdiff'] = np.nanmax(RCP2GMT_diff)
-                        d_climate_data_meta[i][f'GMT_{name}_valid'] = np.nanmax(RCP2GMT_diff) < max_diff_valid
-                        d_climate_data_meta[i][f'ind_RCP2GMT_{name}'] = ind_RCP2GMT
+                        for df_traj, name in zip(GMT_extra_trajectories,GMT_extra_trajectories_names ): 
+                            RCP2GMT_diff = np.min(np.abs(d_climate_data_meta[i]['GMT'].values - df_traj.values.transpose()), axis=0)
+                            ind_RCP2GMT= np.argmin(np.abs(d_climate_data_meta[i]['GMT'].values - df_traj.values.transpose()), axis=0)
+                            d_climate_data_meta[i][f'GMT_{name}_maxdiff'] = np.nanmax(RCP2GMT_diff)
+                            d_climate_data_meta[i][f'GMT_{name}_valid'] = np.nanmax(RCP2GMT_diff) < max_diff_valid
+                            d_climate_data_meta[i][f'ind_RCP2GMT_{name}'] = ind_RCP2GMT
 
 
-                # update counter
-                i += 1
+                    # update counter
+                    i += 1
 
-                # what are you doing with da_AFA here??? why do you need to load the data? if not using 
-                # was getting saved as pickle - could do elsewhere, or output in fxn return ?? 
+                    # what are you doing with da_AFA here??? why do you need to load the data? if not using 
+                    # was getting saved as pickle - could do elsewhere, or output in fxn return ?? 
 
     return d_climate_data_meta 
 
@@ -350,8 +364,11 @@ def calc_weighted_fldmean(
 
 @timeit
 def load_climate_data_array(climatedata_dir,
+                    data_source,
+                    project_phase,
                     scenario,
-                    model,
+                    gcm,
+                    impact_model,
                     extreme,
                     year_start,
                     year_end,
@@ -384,20 +401,8 @@ def load_climate_data_array(climatedata_dir,
                 lat=slice(latmax, latmin), lon=slice(lonmin, lonmax), time=slice(year_start, year_end)
                 )
 
-
-    # QL: This will need to be changed!! It is now hard-coded.
-    #filepath_hist = glob.glob(os.path.join(climatedata_dir, 'historical', model, f'*{model}*{extreme}.nc'))[0]
-    #filepath_rcp = glob.glob(os.path.join(climatedata_dir, scenario, model, f'*{model}*{extreme}.nc'))[0]
-
-    data_source = "ISIMIP"
-    project_phase = "isimip2b"
-    #extreme = "heatwavedarea"
-    #model = "hwmid99"
-    gcm = "hadgem2-es"
-    #scenario = "rcp26"
-
-    filepath_hist = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, model.lower(), f'{model.lower()}_{gcm.lower()}_historical*1861_2005.nc4'))[0]
-    filepath_rcp = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, model.lower(), f'{model.lower()}_{gcm.lower()}_{scenario}*2006_2099.nc4'))[0]
+    filepath_hist = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_historical*1861_2005.nc4'))[0]
+    filepath_rcp = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_{scenario}*2006_2099.nc4'))[0]
 
     print(f'Loading {filepath_hist}')
     print(f'Loading {filepath_rcp}')
@@ -578,13 +583,19 @@ def calc_landfraction_exposed(
 
         print('                         🟠 Remapping Simulation {} of {} 🟠\n'.format(i,len(d_climate_data_meta)))
 
+        data_source = d_climate_data_meta[i]['data_source']
+        project_phase = d_climate_data_meta[i]['project_phase']
         scenario = d_climate_data_meta[i]['scenario']
-        model = d_climate_data_meta[i]['model']
+        gcm = d_climate_data_meta[i]['gcm']
         extreme = d_climate_data_meta[i]['extreme']
+        impact_model = d_climate_data_meta[i]['impact_model']
 
         da_AFA = load_climate_data_array(climatedata_dir,
+                    data_source,
+                    project_phase,
                     scenario,
-                    model,
+                    gcm,
+                    impact_model,
                     extreme,
                     year_start,
                     year_end,
@@ -709,7 +720,7 @@ def calc_landfraction_exposed(
 
 @timeit
 def calc_lifetime_exposure(
-    d_climate_data_meta, 
+    d_climate_data_meta,
     df_countries, 
     countries_regions, 
     countries_mask, 
@@ -862,14 +873,20 @@ def calc_lifetime_exposure(
 
         print('                         🟠 Remapping Simulation {} of {} 🟠\n'.format(i,len(d_climate_data_meta)))
 
+        data_source = d_climate_data_meta[i]['data_source']
+        project_phase = d_climate_data_meta[i]['project_phase']
         scenario = d_climate_data_meta[i]['scenario']
-        model = d_climate_data_meta[i]['model']
+        gcm = d_climate_data_meta[i]['gcm']
         extreme = d_climate_data_meta[i]['extreme']
+        impact_model = d_climate_data_meta[i]['impact_model']
 
         da_AFA = load_climate_data_array(
             climatedata_dir,
+            data_source,
+            project_phase,
             scenario,
-            model,
+            gcm,
+            impact_model,
             extreme,
             year_start,
             year_end,
@@ -1110,7 +1127,7 @@ def calc_lifetime_exposure(
 
 @timeit
 def calc_lifetime_exposure_subnational(
-    d_climate_data_meta, 
+    d_climate_data_meta,
     df_countries, 
     subnational_regions, 
     subnational_mask, 
@@ -1238,14 +1255,20 @@ def calc_lifetime_exposure_subnational(
 
         print('                         🟠 Remapping Simulation {} of {} 🟠\n'.format(i,len(d_climate_data_meta)))
 
+        data_source = d_climate_data_meta[i]['data_source']
+        project_phase = d_climate_data_meta[i]['project_phase']
         scenario = d_climate_data_meta[i]['scenario']
-        model = d_climate_data_meta[i]['model']
+        gcm = d_climate_data_meta[i]['gcm']
         extreme = d_climate_data_meta[i]['extreme']
+        impact_model = d_climate_data_meta[i]['impact_model']
 
         da_AFA = load_climate_data_array(
             climatedata_dir,
+            data_source,
+            project_phase,
             scenario,
-            model,
+            gcm,
+            impact_model,
             extreme,
             year_start,
             year_end,
