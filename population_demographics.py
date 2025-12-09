@@ -39,7 +39,7 @@ def load_country_metadata(
     worldbank_filter=True,
 ):
     """
-    load country list metadata from worldbank (218 countries) - see what year this is from
+    load country list metadata from worldbank (218 countries) - see what year this classification is from
 
     Input
         filepath_world_bank (str) 
@@ -847,11 +847,13 @@ def load_subnational_mask(
                                                             # it will make mask on grid of da_population, so it needs to be relevant to broader analysis
                                                             # check if better to force bbox to be provided... or to alternatively not crop da_population 
 
+    # sort alphabetically based on ID (not necessary, but looks cleaner)
+    gdf = gdf.sort_values(col_id).reset_index(drop=True)
 
     # create regions object and mask object
     subnational_regions = regionmask.from_geopandas(
         gdf, 
-        names=col_name, 
+        names=col_id, 
         abbrevs=col_id, 
         name=col_name
     )
