@@ -922,7 +922,7 @@ def calc_lifetime_exposure(
 
         print('⏳ Computing the Population-Weighted Spatial Average of the Exposure for all regions\n')
 
-        # TODO: apply same logic to this !! 
+        # TODO: apply same logic to regions !! 
 
         # initialise dict
         d_exposure_perregion = {}

@@ -39,7 +39,7 @@ def load_country_metadata(
     worldbank_filter=True,
 ):
     """
-    load country list metadata from worldbank (218 countries) - see what year this is from
+    load country list metadata from worldbank (218 countries) - see what year this classification is from
 
     Input
         filepath_world_bank (str) 
