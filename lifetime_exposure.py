@@ -377,50 +377,67 @@ def load_climate_data_array(climatedata_dir,
                     ):
     """" Load climate data, concat historical + rcp, clean data. Assumes there is only one variable of interest"""
 
-    # Auxiliary function to slice  dataset to a particular region and time 
-    def cut_to_region_time(da):
-        # rename for compatibility with population objects
-        if 'latitude' in da.coords:
-            da = da.rename({'latitude':'lat', 'longitude':'lon'})
-        # slice time
-        if da.time.dtype == 'datetime64[ns]':
-            da['time'] = da['time'].dt.year
-        else:
-            #da['time'] = da['time'].astype(int) + startyear_ssp TODO: cehck if this was necessary? 
-            raise ValueError(f'time undefined for array {da}')
-        # cut space
-        if bbox is None:
-            return da.sel(time=slice(year_start, year_end))
-        latmin, latmax, lonmin, lonmax = bbox 
-        if da.lat.values[0] < da.lat.values[-1]: # check if lat is increasing or decreasing
-            return da.sel(
-                lat=slice(latmin, latmax), lon=slice(lonmin, lonmax), time=slice(year_start, year_end)
-                )
-        else:
-            return da.sel(
-                lat=slice(latmax, latmin), lon=slice(lonmin, lonmax), time=slice(year_start, year_end)
-                )
 
-    filepath_hist = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_historical*1861_2005.nc4'))[0]
-    filepath_rcp = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_{scenario}*2006_2099.nc4'))[0]
+    # Auxiliary function to slice  dataset to a particular region and time 
+    def cut_to_region_time(da, bbox=None, year_start=None, year_end=None):
+        """
+        Slice DataArray by time and spatial bounding box.
+        Assumes da.time is integer years.
+        """
+        # Rename coordinates for consistency
+        if 'latitude' in da.coords:
+            da = da.rename({'latitude': 'lat', 'longitude': 'lon'})
+
+        # Slice by time
+        if year_start is not None and year_end is not None:
+            da = da.sel(time=slice(year_start, year_end))
+
+        # Slice by spatial bbox
+        if bbox is not None:
+            latmin, latmax, lonmin, lonmax = bbox
+            if da.lat.values[0] < da.lat.values[-1]:
+                da = da.sel(lat=slice(latmin, latmax), lon=slice(lonmin, lonmax))
+            else:
+                da = da.sel(lat=slice(latmax, latmin), lon=slice(lonmin, lonmax))
+
+        return da
+
+
+    if extreme in ['heatwavedarea', 'driedarea', 'tropicalcyclonedarea', 'cropfailedarea', 'floodedarea', 'burntarea']:
+        filepath_hist = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_historical*landarea_1861_2005.nc4'))[0]
+        filepath_rcp = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_{scenario}*landarea_2006_2099.nc4'))[0]
 
     print(f'Loading {filepath_hist}')
     print(f'Loading {filepath_rcp}')
+
     da_AFA = xr.open_mfdataset(
                 [filepath_hist, filepath_rcp],
                 combine='nested',
                 concat_dim='time',
-                decode_coords='all',
-                preprocess=cut_to_region_time,
+                decode_times=False,
+                preprocess=lambda da: cut_to_region_time(da, bbox=bbox, year_start=year_start, year_end=year_end),
             )
     VAR = list(da_AFA.data_vars)[0] # assumes there is only one variable of interest ! 
     da_AFA = da_AFA[VAR]
 
     # 4) if needed, repeat mean of last 10 years until entire period of interest is covered 
-    if da_AFA.time.max() < year_end: 
-        da_AFA_lastyear = da_AFA.isel(time=slice(-10, None)).mean(dim='time').expand_dims(dim='time',axis=0)
-        for year in range(da_AFA.time.max().values+1,year_end+1): 
-            da_AFA = xr.concat([da_AFA,da_AFA_lastyear.assign_coords(time = [year])], dim='time')
+    #year_end_ts = pd.Timestamp(f"{year_end}-12-31")
+    #if da_AFA.time.max() < year_end_ts:
+     #   da_AFA_lastyear = da_AFA.isel(time=slice(-10, None)).mean(dim='time').expand_dims(dim='time',axis=0)
+      #  last_time = pd.Timestamp(da_AFA.time.max().values)
+       # for year in range(last_time.year + 1, year_end + 1):
+        #    new_time = pd.Timestamp(f"{year}-01-01")
+         #   da_AFA = xr.concat([da_AFA, da_AFA_lastyear.assign_coords(time=[new_time])], dim='time')
+
+    last_time = da_AFA.time.max().item()  # converts 0-d DataArray to scalar
+    year_end_ts = pd.Timestamp(f"{year_end}-12-31")
+
+    if last_time < year_end_ts:
+        # repeat last 10-year mean
+        da_AFA_lastyear = da_AFA.isel(time=slice(-10, None)).mean(dim='time').expand_dims(dim='time', axis=0)
+        for year in range(last_time.year + 1, year_end + 1):
+            new_time = pd.Timestamp(f"{year}-01-01")
+            da_AFA = xr.concat([da_AFA, da_AFA_lastyear.assign_coords(time=[new_time])], dim='time')
 
     # to take a more RIME-like approach - smooth the climate data also - no natural variability only forced signal - TESTING
     if smoothing_window:
