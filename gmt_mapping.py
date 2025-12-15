@@ -266,7 +266,7 @@ def load_GMT(
     })
 
     # currently using only hist from this earlier version of df_GMT_15 (df_GMT_15 gets remade below)
-    df_GMT_15 = df_GMT_SR15.loc[year_start:,'IPCCSR15_MESSAGEix-GLOBIOM 1.0_LowEnergyDemand_GAS']
+    df_GMT_15 = df_GMT_SR15.loc[year_start-21:,'IPCCSR15_MESSAGEix-GLOBIOM 1.0_LowEnergyDemand_GAS']
     # check and drop duplicate years
     df_GMT_15 = df_GMT_15[~df_GMT_15.index.duplicated(keep='first')]
 
@@ -322,30 +322,40 @@ def load_GMT(
     df_GMT_ar6.index = df_GMT_ar6.index.astype(int)
 
     # stitch with same tseries for early decades
-
-    if smooth_first_decades:
-        # option to smooth the first decades, otherwise has more variability than later decades 
-        # 2000 is a hot year in the GMT_15 timeseries so it creates a jump to go only until 1999 with the historical, changed for this 
-
-        # opion 1) rolling mean
-        df_GMT_15 = df_GMT_15.rolling(21,min_periods=1,center=True).mean()
-
-        # option 2) lowess - looks very similar 
-        #frac = np.round( 21 / len(df_GMT_15), 2)
-        #y_smo = sm.nonparametric.lowess(df_GMT_15.values.ravel(), np.arange(len(df_GMT_15)), frac=frac, return_sorted=False) # use loess instead to get smoother endpoints
-        #df_GMT_15 = pd.DataFrame(y_smo, index=df_GMT_15.index)
-        df_hist_all = df_GMT_15.loc[year_start:2016]
-    else:
-        df_hist_all = df_GMT_15.loc[year_start:1999]
-        
+    # make sure you take year_start - smoothing window, if you are smoothing early decades
+    df_hist_all = df_GMT_15.loc[year_start-21 : 1999]
     df_hist_all = pd.concat([df_hist_all for i in range(len(df_GMT_ar6.columns))],axis=1)
     df_hist_all.columns = df_GMT_ar6.columns
     df_GMT_ar6 = pd.concat([df_hist_all,df_GMT_ar6],axis=0) # add historical values to additional scenarios
-    
-    # drop dups
+    # drop duplicate years
     df_GMT_ar6 = df_GMT_ar6[~df_GMT_ar6.index.duplicated(keep='first')]
 
-    # get new trajects - this overwrites the above df_GMT_15
+    if smooth_first_decades:
+        # option to smooth the first decades, otherwise has more variability than later decades 
+        # make the smoothing end at no smoothing in 2020, linear transition of weights from 2000 to 2020 
+        df = df_GMT_ar6
+        start_transition=2000
+        len_transition=20
+        end_transition=start_transition+len_transition
+
+        # smooth the whole timeseries
+        smooth = df.rolling(21, center=True, min_periods=1).mean()
+
+        # make weights that transition from 1 (take fully the smoothed series) to 0 (take fully the original, AR6 timeseries)
+        years = df.index.year if hasattr(df.index, "year") else df.index
+        w = pd.Series(0.0, index=df.index)
+        w.loc[years <= start_transition] = 1.0
+        mask = (years > start_transition) & (years < end_transition)
+        w.loc[mask] = (end_transition - years[mask]) / (end_transition - start_transition)
+
+        # merge the original series and the smoothed series, overwrite the original series
+        df_GMT_ar6 = smooth.mul(w, axis=0).add(df.mul(1 - w, axis=0))
+    
+    # take only years you effectively want
+    df_GMT_ar6 = df_GMT_ar6.loc[year_start:]
+
+
+    # get new trajectories - this overwrites the above df_GMT_15
     df_GMT_lb, df_GMT_15, df_GMT_20, df_GMT_NDC, df_GMT_30, df_GMT_40 = ar6_scen_grab(
         scen_thresholds,
         df_GMT_ar6,
