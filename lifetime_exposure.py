@@ -14,6 +14,7 @@ import glob, os
 import numpy as np
 import xarray as xr
 import pandas as pd
+import cftime
 
 from ._settings import * 
 
@@ -379,33 +380,70 @@ def load_climate_data_array(climatedata_dir,
 
 
     # Auxiliary function to slice  dataset to a particular region and time 
-    def cut_to_region_time(da, bbox=None, year_start=None, year_end=None):
+    def cut_to_region_time(ds):
         """
-        Slice DataArray by time and spatial bounding box.
-        Assumes da.time is integer years.
+        Preprocess a file:
+        - Assign integer years based on filename if needed
+        - Rename latitude/longitude to lat/lon
+        - Slice spatially using bbox
+        - Slice temporally using year_start/year_end
         """
-        # Rename coordinates for consistency
-        if 'latitude' in da.coords:
-            da = da.rename({'latitude': 'lat', 'longitude': 'lon'})
+        # -----------------------------------------
+        # 1) Assign time coordinates. If we have a non-standard calendar,
+        #    extract years from filename and assign clean time coordinates.
+        # !! This only works with ISIMIP nomenclature or other file names finishing by _startyr_endyr.nc !! 
+        # -----------------------------------------
+        
+        # --- Try decoding time using units ---
+        units = ds.time.attrs.get("units", None)
+        cal   = ds.time.attrs.get("calendar", "standard")
 
-        # Slice by time
-        if year_start is not None and year_end is not None:
-            da = da.sel(time=slice(year_start, year_end))
+        try:
+            times = cftime.num2date(ds.time.values, units=units, calendar=cal)
+            years = np.array([t.year for t in times])
 
-        # Slice by spatial bbox
+        except Exception:
+            # --- Fallback: use filename years ---
+            fname = ds.encoding.get("source", "")
+            begin_year = int(fname.split('_')[-2])
+            end_year = int(fname.split('_')[-1].split('.')[0])
+
+            years = np.arange(begin_year, end_year + 1)
+
+        ds = ds.assign_coords(time=("time", years))
+
+        # -----------------------------------------
+        # 2) Rename coords for consistency with population objects if needed
+        # -----------------------------------------
+        if "latitude" in ds.coords:
+            ds = ds.rename({"latitude": "lat", "longitude": "lon"})
+        
+        # -----------------------------------------
+        # 3) Slice along the time dimension
+        # -----------------------------------------
+        ds = ds.sel(time=slice(year_start, year_end))
+
+        # -----------------------------------------
+        # 4) Slice spatial bounding box if provided
+        # -----------------------------------------
         if bbox is not None:
             latmin, latmax, lonmin, lonmax = bbox
-            if da.lat.values[0] < da.lat.values[-1]:
-                da = da.sel(lat=slice(latmin, latmax), lon=slice(lonmin, lonmax))
+            if ds.lat.values[0] < ds.lat.values[-1]:
+                ds = ds.sel(lat=slice(latmin, latmax), lon=slice(lonmin, lonmax))
             else:
-                da = da.sel(lat=slice(latmax, latmin), lon=slice(lonmin, lonmax))
+                ds = ds.sel(lat=slice(latmax, latmin), lon=slice(lonmin, lonmax))
 
-        return da
-
+        return ds
 
     if extreme in ['heatwavedarea', 'driedarea', 'tropicalcyclonedarea', 'cropfailedarea', 'floodedarea', 'burntarea']:
-        filepath_hist = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_historical*landarea_1861_2005.nc4'))[0]
-        filepath_rcp = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_{scenario}*landarea_2006_2099.nc4'))[0]
+
+        # For ISIMIP2b data
+        #filepath_hist = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_historical*landarea_1861_2005.nc4'))[0]
+        #filepath_rcp = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_{scenario}*landarea_2006_2099.nc4'))[0]
+        
+        # For ISIMIP3b data
+        filepath_hist = glob.glob(os.path.join(climatedata_dir, project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_historical*landarea_1851_2014.nc'))[0]
+        filepath_rcp  = glob.glob(os.path.join(climatedata_dir, project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_{scenario}*landarea_2015_2099.nc'))[0]
 
     print(f'Loading {filepath_hist}')
     print(f'Loading {filepath_rcp}')
@@ -415,38 +453,24 @@ def load_climate_data_array(climatedata_dir,
                 combine='nested',
                 concat_dim='time',
                 decode_times=False,
-                preprocess=lambda da: cut_to_region_time(da, bbox=bbox, year_start=year_start, year_end=year_end),
+                decode_coords='all',
+                preprocess=cut_to_region_time,
             )
+
     VAR = list(da_AFA.data_vars)[0] # assumes there is only one variable of interest ! 
     da_AFA = da_AFA[VAR]
 
-    # 4) if needed, repeat mean of last 10 years until entire period of interest is covered 
-    #year_end_ts = pd.Timestamp(f"{year_end}-12-31")
-    #if da_AFA.time.max() < year_end_ts:
-     #   da_AFA_lastyear = da_AFA.isel(time=slice(-10, None)).mean(dim='time').expand_dims(dim='time',axis=0)
-      #  last_time = pd.Timestamp(da_AFA.time.max().values)
-       # for year in range(last_time.year + 1, year_end + 1):
-        #    new_time = pd.Timestamp(f"{year}-01-01")
-         #   da_AFA = xr.concat([da_AFA, da_AFA_lastyear.assign_coords(time=[new_time])], dim='time')
-
-    last_time = da_AFA.time.max().item()  # converts 0-d DataArray to scalar
-    year_end_ts = pd.Timestamp(f"{year_end}-12-31")
-
-    if last_time < year_end_ts:
-        # repeat last 10-year mean
-        da_AFA_lastyear = da_AFA.isel(time=slice(-10, None)).mean(dim='time').expand_dims(dim='time', axis=0)
-        for year in range(last_time.year + 1, year_end + 1):
-            new_time = pd.Timestamp(f"{year}-01-01")
-            da_AFA = xr.concat([da_AFA, da_AFA_lastyear.assign_coords(time=[new_time])], dim='time')
+    # if needed, repeat mean of last 10 years until entire period of interest is covered
+    if da_AFA.time.max() < year_end: 
+        da_AFA_lastyear = da_AFA.isel(time=slice(-10, None)).mean(dim='time').expand_dims(dim='time',axis=0)
+        for year in range(da_AFA.time.max().values+1,year_end+1): 
+            da_AFA = xr.concat([da_AFA,da_AFA_lastyear.assign_coords(time = [year])], dim='time') 
 
     # to take a more RIME-like approach - smooth the climate data also - no natural variability only forced signal - TESTING
     if smoothing_window:
         da_AFA = da_AFA.rolling(time=smoothing_window, center=True, min_periods=1).mean()
 
     return da_AFA
-
-
-
 
 
 
