@@ -438,12 +438,15 @@ def load_climate_data_array(climatedata_dir,
     if extreme in ['heatwavedarea', 'driedarea', 'tropicalcyclonedarea', 'cropfailedarea', 'floodedarea', 'burntarea']:
 
         # For ISIMIP2b data
-        #filepath_hist = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_historical*landarea_1861_2005.nc4'))[0]
-        #filepath_rcp = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_{scenario}*landarea_2006_2099.nc4'))[0]
+        if project_phase.lower() == 'isimip2b':
+            filepath_hist = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_historical*landarea_1861_2005.nc4'))[0]
+            filepath_rcp = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_{scenario}*landarea_2006_2099.nc4'))[0]
         
         # For ISIMIP3b data
-        filepath_hist = glob.glob(os.path.join(climatedata_dir, project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_historical*landarea_1851_2014.nc'))[0]
-        filepath_rcp  = glob.glob(os.path.join(climatedata_dir, project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_{scenario}*landarea_2015_2099.nc'))[0]
+        elif project_phase.lower() == 'isimip3b':
+            
+            filepath_hist = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_historical*landarea_1850_2014.nc'))[0]
+            filepath_rcp  = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_{scenario}*landarea_2015_2100.nc'))[0]
 
     print(f'Loading {filepath_hist}')
     print(f'Loading {filepath_rcp}')
