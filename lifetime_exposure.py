@@ -381,17 +381,31 @@ def load_climate_data_array(climatedata_dir,
                 lat=slice(latmax, latmin), lon=slice(lonmin, lonmax), time=slice(year_start, year_end)
                 )
 
-    filepath_hist = glob.glob(os.path.join(climatedata_dir, 'historical', model, f'*{model}*{extreme}.nc'))[0]
-    filepath_rcp = glob.glob(os.path.join(climatedata_dir, scenario, model, f'*{model}*{extreme}.nc'))[0]
-    print(f'Loading {filepath_hist}')
-    print(f'Loading {filepath_rcp}')
-    da_AFA = xr.open_mfdataset(
-                [filepath_hist, filepath_rcp],
-                combine='nested',
-                concat_dim='time',
-                decode_coords='all',
-                preprocess=cut_to_region_time,
-            )
+    if scenario != 'reanalysis':
+        filepath_hist = glob.glob(os.path.join(climatedata_dir, 'historical', model, f'*{model}*{extreme}.nc'))[0]
+        filepath_rcp = glob.glob(os.path.join(climatedata_dir, scenario, model, f'*{model}*{extreme}.nc'))[0]
+        print(f'Loading {filepath_hist}')
+        print(f'Loading {filepath_rcp}')
+        da_AFA = xr.open_mfdataset(
+                    [filepath_hist, filepath_rcp],
+                    combine='nested',
+                    concat_dim='time',
+                    decode_coords='all',
+                    preprocess=cut_to_region_time,
+                )
+
+    else:
+        filepath = glob.glob(os.path.join(climatedata_dir, scenario, model, f'*{model}*{extreme}.nc'))[0]
+        print(f'Loading {filepath}')
+        da_AFA = xr.open_mfdataset(
+                    [filepath],
+                    combine='nested',
+                    concat_dim='time',
+                    decode_coords='all',
+                    preprocess=cut_to_region_time,
+                )
+
+
     VAR = list(da_AFA.data_vars)[0] # assumes there is only one variable of interest ! 
     da_AFA = da_AFA[VAR]
 
