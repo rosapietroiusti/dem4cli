@@ -158,6 +158,7 @@ def load_GMT(
     year_end,
     gmt_extend_method='10yrtrend',
     smooth_first_decades=True,
+    source_historical='AR6'
 ):
 
     """
@@ -166,11 +167,16 @@ def load_GMT(
     intervals as stylized trajectories, interpolates again to have pathways going from 1.5 to 3.5 degrees in 2100. 
 
     Input
-        year_start, year_end:       desired start and end of stylized trajectories
-        gmt_extend_method (str):    options to extend past 2100 - '10yrmean' 'lastyear' and '10yrtrend'
-                                    respectively repeat last 10 year mean, repeat last year and extend last 
-                                    10 year trend
-        filepaths embedded in function 
+        year_start, year_end:           desired start and end of stylized trajectories
+        gmt_extend_method (str):        options to extend past 2100 - '10yrmean' 'lastyear' and '10yrtrend'
+                                        respectively repeat last 10 year mean, repeat last year and extend last 
+                                        10 year trend
+        smooth_first_decades (Bool):    Whether or not to smooth decades up to 2000 with a 21-year rolling mean. 
+                                        The years 2000-2020 then smoothly transition to the post-2020 timeseries,
+                                        to avoid any discontinuities
+        source_historical (str):        'AR6' years up to 2000 come from the AR6 4-dataset mean (cred: Blair Trewin / Chris Smith)
+                                        'SR1.5' years up to 2000 come from SR1.5, original from Thiery et al. 2021
+        filepaths are embedded in function 
 
     Returns 
         df_GMT_15, df_GMT_20, df_GMT_NDC, df_GMT_OS, df_GMT_noOS, ds_GMT_STS, df_GMT_strj (dfs) :   stylized trajectories. OS and noOS come from Wim's original code, NDC hits ~2.4 in 2100 (defined in settings)
@@ -265,10 +271,27 @@ def load_GMT(
         3 : 'IPCCSR15_MESSAGEix-GLOBIOM 1.0_LowEnergyDemand_GAS'
     })
 
-    # currently using only hist from this earlier version of df_GMT_15 (df_GMT_15 gets remade below)
-    df_GMT_15 = df_GMT_SR15.loc[year_start-21:,'IPCCSR15_MESSAGEix-GLOBIOM 1.0_LowEnergyDemand_GAS']
-    # check and drop duplicate years
-    df_GMT_15 = df_GMT_15[~df_GMT_15.index.duplicated(keep='first')]
+
+    # ---------------------------------------------------------- #
+    # Load historical GMST from SR1.5 or AR6                     #                                     
+    # ---------------------------------------------------------- #
+
+    if source_historical == 'SR1.5':
+        # currently using only hist from this earlier version - ROSA I think this should be deprecated 
+        df_GMT_hist = df_GMT_SR15.loc[year_start-21:,'IPCCSR15_MESSAGEix-GLOBIOM 1.0_LowEnergyDemand_GAS']
+    elif source_historical == 'AR6':
+        df_GMT_hist = pd.read_excel(
+                                    dir_temperature_trajectories+'/temperature-trajectories_AR6/AR6 FGD assessment time series - GMST and GSAT.xlsx', 
+                                    sheet_name=1, 
+                                    header=None,
+                                    index_col=0
+                                    )
+    else:
+        raise ValueError(f"Unknown source_historical: {source_historical}, must be one of 'SR1.5' or 'AR6' ")
+    
+    # drop any duplicate years
+    df_GMT_hist = df_GMT_hist[~df_GMT_hist.index.duplicated(keep='first')]
+
 
     # ---------------------------------------------------------- #
     # Definition of the OverShoot (OS) and no-OverShoot (noOS)   #
@@ -321,18 +344,29 @@ def load_GMT(
     df_GMT_ar6 = df_GMT_ar6.dropna(axis=1)
     df_GMT_ar6.index = df_GMT_ar6.index.astype(int)
 
-    # stitch with same tseries for early decades
-    # make sure you take year_start - smoothing window, if you are smoothing early decades
-    df_hist_all = df_GMT_15.loc[year_start-21 : 1999]
+    # stitch with historical timeseries for early decades
+    if source_historical=='AR6' and smooth_first_decades:
+        # best option
+        df_hist_all = df_GMT_hist.rolling(window=21,center=True).mean().loc[year_start:1999]
+    elif source_historical=='AR6' and not smooth_first_decades:
+        # not recommended
+        df_hist_all = df_GMT_hist.loc[year_start:1999]
+        print(' source_historical = AR6 and smooth_first_decades = False not recommended due to inconsistent representation of internal variability, \n \
+                recommended to switch to smooth_first_decades = True')
+    elif source_historical=='SR1.5':
+        # take year_start minus smoothing window, in case you are smoothing early decades
+        # to deprecate 
+        df_hist_all = df_GMT_hist.loc[year_start-21 : 1999]
+    
+    # concatenate historical + projections and drop duplicate years
     df_hist_all = pd.concat([df_hist_all for i in range(len(df_GMT_ar6.columns))],axis=1)
     df_hist_all.columns = df_GMT_ar6.columns
     df_GMT_ar6 = pd.concat([df_hist_all,df_GMT_ar6],axis=0) # add historical values to additional scenarios
-    # drop duplicate years
     df_GMT_ar6 = df_GMT_ar6[~df_GMT_ar6.index.duplicated(keep='first')]
 
-    if smooth_first_decades:
+    if source_historical=='SR1.5' and smooth_first_decades:
         # option to smooth the first decades, otherwise has more variability than later decades 
-        # make the smoothing end at no smoothing in 2020, linear transition of weights from 2000 to 2020 
+        # and make the smoothing end at no smoothing in 2020, linear transition of weights from 2000 to 2020 
         df = df_GMT_ar6
         start_transition=2000
         len_transition=20
@@ -355,7 +389,7 @@ def load_GMT(
     df_GMT_ar6 = df_GMT_ar6.loc[year_start:]
 
 
-    # get new trajectories - this overwrites the above df_GMT_15
+    # get new trajectories 
     df_GMT_lb, df_GMT_15, df_GMT_20, df_GMT_NDC, df_GMT_30, df_GMT_40 = ar6_scen_grab(
         scen_thresholds,
         df_GMT_ar6,
@@ -461,7 +495,7 @@ def calc_model_gmst(experiments=scenarios,
     """
     Calc model GMST from Pangeo
     Todo: move this big fxn to preprocessing
-    Make just a function that does it for specific model simulations / ensemble members if its not available in preprocessed file 
+    Optionally - Make just a function that does it for specific model simulations / ensemble members if its not available in preprocessed file 
     """
 
     from tqdm.autonotebook import tqdm 
