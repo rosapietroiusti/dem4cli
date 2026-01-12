@@ -718,7 +718,7 @@ def calc_landfraction_exposed(
                     src = ds_lfe_percountry_perrun['landfrac_peryear_percountry_RCP'].sel(run=i)
 
                     # assign remapped 
-                    ds_lfe_percountry_perrun[f'landfrac_peryear_percountry_{suffix}'].loc[dict(run=i)] = src.isel(time_ind=ind_RCP) #.values
+                    ds_lfe_percountry_perrun[f'landfrac_peryear_percountry_{suffix}'].loc[dict(run=i)] = src.isel(time_ind=ind_RCP).values
 
             elif suffix == "strj":
                 # repeat for the regular interval GMT stylized trajectories
