@@ -786,19 +786,21 @@ def calc_lifetime_exposure(
         return exposure_birthyears_percountry
 
 
+    #---------------------------------------------------------------------#
     # 1) Build Dataset for regions result
+    #---------------------------------------------------------------------#
 
     # get regions and income groups and 'World' (=all countries)
+
     region_names = np.concatenate([df_countries['region'].dropna().unique(),
                             df_countries['incomegroup'].dropna().unique(),
                             ['World'] # if using a bbox this is all countries in the bbox - rename to all_countries? 
     ])
 
     # Shared shape for all variables
+
     nregions = len(region_names)
-
     birth_years = np.arange(start_birthyear, end_birthyear+1)
-
     year_range = np.arange(year_start, year_end+1)
 
     shape = (
@@ -841,7 +843,10 @@ def calc_lifetime_exposure(
         }
     )
 
+
+    #---------------------------------------------------------------------#
     # 2) Build Dataset for country result
+    #---------------------------------------------------------------------#
 
     # Shared shape for all variables
     shape = (
@@ -871,7 +876,7 @@ def calc_lifetime_exposure(
             np.full(shape_strj, np.nan)
     )
 
-    # Build the dataset
+    # Build the dataset  
     ds_le_percountry_perrun = xr.Dataset(
         data_vars=data_vars,
         coords={
@@ -882,9 +887,10 @@ def calc_lifetime_exposure(
         }
     )
 
+    #---------------------------------------------------------------------#
+    # 3) Loop over simulations
+    #---------------------------------------------------------------------#
 
-    # loop over simulations
-    
     for i in list(d_climate_data_meta.keys()): 
 
         print('                         🟠 Remapping Simulation {} of {} 🟠\n'.format(i,len(d_climate_data_meta)))
@@ -904,7 +910,7 @@ def calc_lifetime_exposure(
             smoothing_window
             )
         
-        # align for masking if there are minor differences
+        # align for masking if there are minor differences in grid
         da_AFA = da_AFA.interp_like(countries_mask, method='linear')
         
         #---------------------------------------------------------------------#
@@ -915,7 +921,7 @@ def calc_lifetime_exposure(
 
         print('⏳ Computing the Population-Weighted Spatial Average of the Exposure for all countries\n')
 
-        # population-weighted average
+        # population-weighted average - instead of using calc_weighted_fldmean() 
         da_exposure_percountry = (da_AFA * da_population).groupby(countries_mask).sum(dim=['stacked_lat_lon']) / da_population.groupby(countries_mask).sum(dim=['stacked_lat_lon']) 
 
         # country name from country code 
@@ -929,9 +935,14 @@ def calc_lifetime_exposure(
         # convert to dataframe with country names as columns
         df = da_exposure_percountry.assign_coords(name=name_map).swap_dims({"mask": "name"}).to_pandas()
 
-        # reorder alphabetically to have same order as df_countries
-        df_exposure_percountry = df.reindex(sorted(df.columns), axis=1)
+        # rename axis name to match da's created later 
+        df.columns.name = 'country' 
 
+        # reorder to have same order as df_countries
+        df_exposure_percountry = df.reindex(
+                                    df_countries['name'].values,
+                                    axis=1
+                                )
 
 
         print('⏳ Computing the Population-Weighted Spatial Average of the Exposure for all regions\n')
@@ -987,15 +998,12 @@ def calc_lifetime_exposure(
 
         print('🟢 Population-Weighted Spatial Average of the Exposure for all countries and regions Computed')
 
-        #del d_exposure_percountry, d_exposure_perregion, d_life_expectancy_perregion 
-
+        # clear memory
         del d_exposure_perregion, d_life_expectancy_perregion 
 
 
+
         # loop over warming scenarios : RCP (model years), example trajs, stylized trajectories (strj)
-
-
-
         for suffix in var_suffixes+['strj']:
 
             print(f'Computing lifetime exposure (LE) for {suffix} \n')
@@ -1013,9 +1021,21 @@ def calc_lifetime_exposure(
                     )
 
                 # convert dataframe to data array of lifetime exposure (le) per country and birth year
-                ds_le_percountry_perrun[f'le_percountry_perrun_{suffix}'].loc[{
-                    'run':i,
-                }] = d_le_percountry_perrun.values.transpose() 
+                da_le = xr.DataArray(
+                    d_le_percountry_perrun,
+                    dims=('birth_year', 'country'),
+                    coords={
+                        'birth_year': birth_years,
+                        'country': d_le_percountry_perrun.columns,
+                    }
+                )
+
+                ds_le_percountry_perrun[f'le_percountry_perrun_{suffix}'].loc[
+                    dict(run=i)
+                ] = da_le
+
+
+
 
                 # calc lifetime exposure per region without remapping
                 d_le_perregion_perrun = df_exposure_perregion.apply(
@@ -1031,7 +1051,11 @@ def calc_lifetime_exposure(
                 ds_le_perregion_perrun[f'le_perregion_perrun_{suffix}'].loc[{
                     'run':i,
                 }] = d_le_perregion_perrun.values.transpose()  
+
+
         
+
+
             elif suffix in var_suffixes:
 
                 if d_climate_data_meta[i][f'GMT_{suffix}_valid']: # if valid
@@ -1051,9 +1075,20 @@ def calc_lifetime_exposure(
                         )
 
                     # convert dataframe to data array of lifetime exposure (le) per country and birth year
-                    ds_le_percountry_perrun[f'le_percountry_perrun_{suffix}'].loc[{
-                        'run':i,
-                    }] = d_le_percountry_perrun.values.transpose() 
+                    da_le = xr.DataArray(
+                        d_le_percountry_perrun,
+                        dims=('birth_year', 'country'),
+                        coords={
+                            'birth_year': birth_years,
+                            'country': d_le_percountry_perrun.columns,
+                        }
+                    )
+
+                    ds_le_percountry_perrun[f'le_percountry_perrun_{suffix}'].loc[
+                        dict(run=i)
+                    ] = da_le
+
+                    
 
 
                     # remap per pathway and calc lifetime exposure per region 
@@ -1073,6 +1108,9 @@ def calc_lifetime_exposure(
                         'run':i,
                     }] = d_le_perregion_perrun.values.transpose() 
                 
+
+
+
             elif suffix == 'strj':
 
                 for step, GMT in enumerate(GMT_labels):
@@ -1095,10 +1133,18 @@ def calc_lifetime_exposure(
                             )
 
                         # convert dataframe to data array of lifetime exposure (le) per country and birth year
-                        ds_le_percountry_perrun[f'le_percountry_perrun_{suffix}'].loc[{
-                            'run':i,
-                            'GMT':GMT,
-                        }] = d_le_percountry_perrun.values.transpose() 
+                        da_le = xr.DataArray(
+                            d_le_percountry_perrun,
+                            dims=('birth_year', 'country'),
+                            coords={
+                                'birth_year': birth_years,
+                                'country': d_le_percountry_perrun.columns,
+                            }
+                        )
+
+                        ds_le_percountry_perrun[f'le_percountry_perrun_{suffix}'].loc[
+                            dict(run=i, GMT=GMT)
+                        ] = da_le
 
 
                         # remap per pathway and calc lifetime exposure per region 
