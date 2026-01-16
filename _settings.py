@@ -21,16 +21,16 @@ To integrate
 """
 
 import os, sys, re 
-from ._utils import * 
+from ._utils import *
 
 
 
 
-# put these settings in functions!! as arguments ! 
+# put these settings in functions!! as arguments !
 
 flags = {}
 
-flags['version'] = 2 
+flags['version'] = 2
                         # v1.0 
                         # v2.0 : new pop data, new cohortsize data, 
 
