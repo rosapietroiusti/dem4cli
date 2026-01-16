@@ -53,8 +53,9 @@ flags['countrymask'] = 'shapefile'
 
 script_dir = os.path.abspath( os.path.dirname( __file__ ) )
 #data_dir = os.path.join(script_dir, 'data') #original from Rosa (needs data to be in my folder)
-data_dir = '/data/brussel/vo/000/bvo00012/shared_subdir/vsc10419/dem4cli/data_dem4cli/data'
-climatedata_dir = '/data/brussel/vo/000/bvo00012/vsc11137/source2suffering/data'
+data_dir = '/data/brussel/vo/000/bvo00012/shared_subdir/vsc10419/dem4cli/data_dem4cli/data'  # Rosa's demographics data 
+#climatedata_dir = '/data/brussel/vo/000/bvo00012/vsc11137/source2suffering/data'   # ISIMIP data from Amaury
+climatedata_dir = '/data/brussel/vo/000/bvo00012/vsc11359/data_climakid/'   # climate impact data for ClimaKid
 
 
 # Data paths for different versions

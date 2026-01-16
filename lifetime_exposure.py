@@ -401,6 +401,7 @@ def load_climate_data_array(climatedata_dir,
         try:
             times = cftime.num2date(ds.time.values, units=units, calendar=cal)
             years = np.array([t.year for t in times])
+            print("Going for option 1")
 
         except Exception:
             # --- Fallback: use filename years ---
@@ -409,6 +410,7 @@ def load_climate_data_array(climatedata_dir,
             end_year = int(fname.split('_')[-1].split('.')[0])
 
             years = np.arange(begin_year, end_year + 1)
+            print("Going for option 2")
 
         ds = ds.assign_coords(time=("time", years))
 
@@ -444,9 +446,14 @@ def load_climate_data_array(climatedata_dir,
         
         # For ISIMIP3b data
         elif project_phase.lower() == 'isimip3b':
-            
             filepath_hist = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_historical*landarea_1850_2014.nc'))[0]
             filepath_rcp  = glob.glob(os.path.join(climatedata_dir, data_source.lower(), project_phase.lower(), extreme, impact_model.lower(), f'{impact_model.lower()}_{gcm.lower()}_{scenario}*landarea_2015_2100.nc'))[0]
+
+    else:
+
+        # tested with ClimaKid data
+        filepath_hist = glob.glob(os.path.join(climatedata_dir, f'{extreme}_{gcm}_historical_*.nc'))[0]
+        filepath_rcp = glob.glob(os.path.join(climatedata_dir, f'{extreme}_{gcm}_{scenario}_*.nc'))[0]
 
     print(f'Loading {filepath_hist}')
     print(f'Loading {filepath_rcp}')
