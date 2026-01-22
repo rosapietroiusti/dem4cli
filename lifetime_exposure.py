@@ -398,7 +398,6 @@ def load_climate_data_array(climatedata_dir,
         try:
             times = cftime.num2date(ds.time.values, units=units, calendar=cal)
             years = np.array([t.year for t in times])
-            print("Going for option 1")
 
         except Exception:
             # --- Fallback: use filename years ---
@@ -407,7 +406,6 @@ def load_climate_data_array(climatedata_dir,
             end_year = int(fname.split('_')[-1].split('.')[0])
 
             years = np.arange(begin_year, end_year + 1)
-            print("Going for option 2")
 
         ds = ds.assign_coords(time=("time", years))
 
