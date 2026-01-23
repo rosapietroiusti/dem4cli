@@ -565,10 +565,15 @@ def calc_landfraction_exposed(
     # 1) Build Dataset for regions result
 
     # get regions and income groups and 'World' (=all countries)
-    region_names = np.concatenate([df_countries['region'].dropna().unique(),
-                            df_countries['incomegroup'].dropna().unique(),
-                            ['World'] # not sure how useful to keep 'World' if you are using a bbox! 
-    ])
+
+    # QL: for the purpose of the India workshop, 
+    # only keep the World region (i.e., all countries within the bounding box) to speed up calculations
+    
+    #region_names = np.concatenate([df_countries['region'].dropna().unique(),
+    #                        df_countries['incomegroup'].dropna().unique(),
+    #                        ['World'] # not sure how useful to keep 'World' if you are using a bbox! 
+    #])
+    region_names = np.array(['World'])
 
     nregions = len(region_names)
 
@@ -887,10 +892,14 @@ def calc_lifetime_exposure(
 
     # get regions and income groups and 'World' (=all countries)
 
-    region_names = np.concatenate([df_countries['region'].dropna().unique(),
-                            df_countries['incomegroup'].dropna().unique(),
-                            ['World'] # if using a bbox this is all countries in the bbox - rename to all_countries? 
-    ])
+    # QL: for the purpose of the India workshop, 
+    # only keep the World region (i.e., all countries within the bounding box) to speed up calculations
+
+    #region_names = np.concatenate([df_countries['region'].dropna().unique(),
+    #                        df_countries['incomegroup'].dropna().unique(),
+    #                        ['World'] # if using a bbox this is all countries in the bbox - rename to all_countries? 
+    #])
+    region_names = np.array(['World'])
 
     # Shared shape for all variables
 
