@@ -366,7 +366,6 @@ def load_climate_data_array(climatedata_dir,
         if da.time.dtype == 'datetime64[ns]':
             da['time'] = da['time'].dt.year
         else:
-            #da['time'] = da['time'].astype(int) + startyear_ssp TODO: cehck if this was necessary? 
             raise ValueError(f'time undefined for array {da}')
         # cut space
         if bbox is None:
@@ -1385,8 +1384,6 @@ def calc_lifetime_exposure_subnational(
         missing_regions = set(gdf_subnational['id']) - set(df.columns)
         df[list(missing_regions)] = np.nan
 
-        # reorder columns alphabetically - no! has to keep same order as when you made original ds
-        #df_exposure_perregion = df.reindex(sorted(df.columns), axis=1)
         # reorder columns to match original gdf order (important for broadcasting later)
         df_exposure_perregion = df.reindex(gdf_subnational.id, axis=1)
 
