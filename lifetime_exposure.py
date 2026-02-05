@@ -17,6 +17,7 @@ import pandas as pd
 import cftime
 
 from ._settings import * 
+from line_profiler import profile
 
 script_dir = os.path.abspath( os.path.dirname( __file__ ) )
 
@@ -482,7 +483,8 @@ def load_climate_data_array(climatedata_dir,
 
 
 
-@timeit
+#@timeit
+@profile
 def calc_landfraction_exposed(
     d_climate_data_meta, 
     df_countries, 
