@@ -737,6 +737,40 @@ def calc_landfraction_exposed(
     return ds_lfe_perregion_perrun, ds_lfe_percountry_perrun, region_names
 
 
+#%%
+
+def calc_life_exposure_rimeX(
+    df_exposure,
+    df_life_expectancy,
+    region_or_country_name
+):
+    # initialise birth years 
+    exposure_birthyears_percountry = np.empty(len(df_life_expectancy))
+
+    for i, birth_year in enumerate(df_life_expectancy.index):
+        life_expectancy = df_life_expectancy.loc[birth_year,region_or_country_name] 
+
+        # define death year based on life expectancy
+        death_year = birth_year + np.floor(life_expectancy)
+
+        # integrate exposure over full years lived
+        exposure_birthyears_percountry[i] = df_exposure.loc[birth_year:death_year,col].sum()
+
+        # add exposure during last (partial) year
+        exposure_birthyears_percountry[i] = exposure_birthyears_percountry[i] + \
+            df_exposure.loc[death_year+1,col].sum() * \
+                (life_expectancy - np.floor(life_expectancy))
+
+    # a series for each column to somehow group into a dataframe
+    exposure_birthyears_percountry = pd.Series(
+        exposure_birthyears_percountry,
+        index=df_life_expectancy.index,
+        name=col,
+    )
+
+    return exposure_birthyears_percountry
+
+
 
 
 #%%
