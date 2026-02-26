@@ -2,18 +2,17 @@
 Demographics4Climate : Population and demographics for climate science analysis
 ----------------------------------------------
 
-2025 Update
+2026 Update by Quentin Lejeune
 
-Calculate land fraction exposed or area-weighted average, and lifetime exposure 
+Calculate lifetime exposure from RIME-X results.
 
 """ 
 #%%
 
 
-import glob, os
+import os
 import numpy as np
 import xarray as xr
-import pandas as pd
 
 from ._settings import * 
 
@@ -41,6 +40,7 @@ def calc_lifetime_exposure_rimex(df_life_expectancy, start_birthyear, end_birthy
         death_years.append(death_yr)
     max_death_yr = int(np.floor(max(death_years)))
     current_max_year = ds_ts_quantiles['year'].max().values
+    print(current_max_year)
 
 
     # 3. If needed, extend the data up until the maximum death year
