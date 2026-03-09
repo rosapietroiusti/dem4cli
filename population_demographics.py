@@ -341,7 +341,7 @@ def load_population_cut_to_region(
 
 
 def load_countrymasks_fillcoasts(
-    filepath=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_fractional.nc'),
+    filepath=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_fractional_05deg.nc'),
     fillcoast=True,
     fix_smallislands=True):
 
@@ -412,7 +412,7 @@ def match_country_names_all_mask_frac(
                       os.path.join(script_dir, 'data/cohort-sizes/WCDE/wicdf_ssp2.csv'), 
                       os.path.join(script_dir, 'data/cohort-sizes/WCDE/wicdf_ssp3.csv')],
     filepath_mask=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks.geojson'),
-    filepath_mask_frac=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_fractional.nc'),
+    filepath_mask_frac=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_fractional_05deg.nc'),
 ):
     """
     A somewhat ugly function that matches country names and country codes between all data sources used. Namely, 
