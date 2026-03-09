@@ -804,11 +804,11 @@ def calc_lifetime_exposure(
             death_year = birth_year + np.floor(life_expectancy)
 
             # integrate exposure over full years lived
-            exposure_birthyears_percountry[i] = df_exposure.loc[birth_year:death_year,col].sum()
+            exposure_birthyears_percountry[i] = df_exposure.loc[birth_year:death_year-1,col].sum()
 
             # add exposure during last (partial) year
             exposure_birthyears_percountry[i] = exposure_birthyears_percountry[i] + \
-                df_exposure.loc[death_year+1,col].sum() * \
+                df_exposure.loc[death_year,col].sum() * \
                     (life_expectancy - np.floor(life_expectancy))
 
         # a series for each column to somehow group into a dataframe
