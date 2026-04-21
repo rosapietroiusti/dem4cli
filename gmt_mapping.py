@@ -158,7 +158,10 @@ def load_GMT(
     year_end,
     gmt_extend_method='10yrtrend',
     smooth_first_decades=True,
-    source_historical='AR6'
+    source_historical='AR6',
+    GMT_min_strj = GMT_min, # defined in settings 
+    GMT_max_strj = GMT_max,
+    GMT_inc = GMT_inc,
 ):
 
     """
@@ -446,10 +449,8 @@ def load_GMT(
     # # Rosa: note that forcing the GMT in 2100 manually causes discontinuity
     # modified it to fix this below, the 1.5 and 3.5 limits are now conditions of the interpolation 
 
-    # Desired GMT range and steps
-    GMT_min = 1.5
-    GMT_max = 3.5
-    GMT_steps = np.round(np.arange(GMT_min, GMT_max + 0.001, 0.1), 2)
+    # Desired GMT range and steps - TODO make this an option! 
+    GMT_steps = np.round(np.arange(GMT_min_strj, GMT_max_strj + 0.001, GMT_inc), 2)
     n_years = len(df_GMT_strj)
 
     # Extract the GMT values corresponding to each original column in df_GMT_strj
