@@ -12,6 +12,8 @@ Based on Thiery et al "Intergenerational inequities in exposure to climate extre
 
 ## Data description
 
+_dem4cli_ uses demographic data and user-provided climate hazard data to estimate age-specific or lifetime exposure to climate hazards.
+
 1. **Life expectancy data** from UNWPP2024 expressed as years left to live at the age of x (ex): https://population.un.org/wpp/downloads?folder=Standard%20Projections&group=Mortality. 
 2. **Gridded population data** reconstructions and projections. *dem4cli* uses data from the COMPASS project (received from Dominik Paprotny, [documentation here](https://compass-climate.eu/Public%20Deliverables/D3.1_Exposure%20datasets%20at%20multiple%20scales.pdf)), for the period 1950-2100, reconstructions until 2025 and projections thereafter, harmonized with SSP version 3.2-beta national totals for projections. Available at 0.1 or 0.5 degrees for SSP1, SSP2 and SSP3 as ancillary package data.
 3. **Cohort sizes** reconstructions and projections at country level from 1950 to 2100. 
