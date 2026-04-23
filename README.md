@@ -12,15 +12,15 @@ Based on Thiery et al "Intergenerational inequities in exposure to climate extre
 
 ## Data description
 
-1. **Life expectancy data** from UNWPP2024 expressed as years left to live at the age of 5 (ex): https://population.un.org/wpp/downloads?folder=Standard%20Projections&group=Mortality. 
-2. **Gridded population data** reconstructions and projections. *dem4cli* uses data from the COMPASS project (received from Dominik Paprotny, [documentation here](https://compass-climate.eu/Public%20Deliverables/D3.1_Exposure%20datasets%20at%20multiple%20scales.pdf)), for the period 1950-2100, reconstructions until 2025 and projections thereafter, harmonized with SSP version 3.2-beta national totals for projections. Available at 0.1 or 0.5 degrees for SSP1, SSP2 and SSP3 as ancillary package data. *[TODO: make this available somewhere]*
+1. **Life expectancy data** from UNWPP2024 expressed as years left to live at the age of x (ex): https://population.un.org/wpp/downloads?folder=Standard%20Projections&group=Mortality. 
+2. **Gridded population data** reconstructions and projections. *dem4cli* uses data from the COMPASS project (received from Dominik Paprotny, [documentation here](https://compass-climate.eu/Public%20Deliverables/D3.1_Exposure%20datasets%20at%20multiple%20scales.pdf)), for the period 1950-2100, reconstructions until 2025 and projections thereafter, harmonized with SSP version 3.2-beta national totals for projections. Available at 0.1 or 0.5 degrees for SSP1, SSP2 and SSP3 as ancillary package data.
 3. **Cohort sizes** reconstructions and projections at country level from 1950 to 2100. 
     1) Option 1: UNWPP2024 cohort size reconstructions until 2023 and projections thereafter at single year and single age intervals. The mediuim variant best estimate is used in *dem4cli*, this is roughly similar to SSP2 fertility projections. 
-    2) Option 2: Wittgenstein Center, SSPs drivers version 3.2-beta (May 2025 release, not publicly distributed yet, request for data access). Data is available as reconstructions up to 2025 and projections thereafter, expressed for 5-year age cohorts at 5-year time snapshots. *dem4cli* supports using this data for SSP1, SSP2 or SSP3.
+    2) Option 2: Wittgenstein Center, SSPs drivers version 3.2-beta (May 2025 release). Data is available as reconstructions up to 2025 and projections thereafter, expressed for 5-year age cohorts at 5-year time snapshots. *dem4cli* supports using this data for SSP1, SSP2 or SSP3.
 4. **Country masks** 
     1) Country shapefiles: from Natural Earth.
     2) Subnational shapefiles: ancillary package data contains shapefiles at NUTS2 and NUTS3 level, for Europe, from Eurostat. 
-    3) Fractional gridded country masks: from ISIpedia, (Perrette 2023, https://github.com/ISI-MIP/isipedia-countries). Not supported in *dem4cli v2*.  
+    3) Fractional gridded country masks: from ISIpedia, (Perrette 2023, https://github.com/ISI-MIP/isipedia-countries). 
 5. **Metadata on income levels and world regions** from the World Bank 2023: https://datatopics.worldbank.org/world-development-indicators/the-world-by-income-and-region.html. 
 
 ### Data availability 
@@ -34,7 +34,8 @@ To run dem4cli, you can include the 'data' folder in the same folder as the 'pop
 ```
 
 > [!WARNING]
-> Data to run dem4cli-v2 is in progress. 
+> Data to run dem4cli-v2
+
 
 
 ## What this module does 
