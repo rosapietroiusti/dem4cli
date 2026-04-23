@@ -1,26 +1,29 @@
 # Demographics4Climate
 
-This is a stand-alone module to calculate population demographics, i.e. population size, cohort size, life expectancy at yearly resolution at gridscale level.
-
-Based on Thiery et al (2021), Grant et al (in review), Vanderkelen et al (in prep), Pietroiusti et al (in prep). Updated in 2024 with new available data, and now possible to run for 1950-2100 under SSP1, SSP2 or SSP3. 
+dem4cli is a stand-alone module to preprocess demographic data (life expectancy, population size, cohort size data) and compute lifetime exposure over stylized trajectories, based on an annual climate hazard dataset that the user can flexibly provide.
 
 Contact: rosa.pietroiusti@vub.be
 
-> [!WARNING]
-> Work in progress: functions to calculate lifetime exposure, at country and gridscale level, taken from Grant et al (2024, in rev)
+## References
 
-## Data used
+Updated in 2025 with new available data and additional functionalities, described in Pietroiusti et al. (2026, in prep). Based on Thiery et al (2021), Grant et al (2025), Vanderkelen et al (2026, in review), Pietroiusti et al. (2026, in review), Laridon et al (2026, in prep). 
 
+## Data description
 
-1. Wittgenstein Center Data Explorer population cohort size from 1950 to 2100 per country (at snapshots every 5 years) (http://dataexplorer.wittgensteincentre.org/wcde-v2/), available for SSP1, SSP2, SSP3. Cohort size data from WCDE is available at a country level for the period 1950-2100 (reconstructions up to 2015 and projections thereafter) expressed for 5-year age cohorts at 5-year time snapshots.
-2. ISIMIP gridded population data reconstructions and projections for SSP1, SSP2 and SSP3 from ISIMIP3a/b (histsoc up to 2021 based on HYDE v3.3 
-Klein Goldewijk et al.2022), from 2022 SSP projections (based on Gao et al. 2020 https://doi.org/10.5065/D60Z721H and https://doi.org/10.7927/q7z9-9r69), scaled to match ISIMIP national population projections under different SSPs. Projections are based on the national SSP scenarios from Lutz et al. (55) and gridded population projections from the National Center for Atmospheric Research (NCAR).
-3. Isipedia fractional country masks are used to match the datasets (Perrette 2023, https://github.com/ISI-MIP/isipedia-countries). 
-4. Metadata on income levels and regions from World Bank (WB 2023, https://datatopics.worldbank.org/world-development-indicators/the-world-by-income-and-region.html)
+1. **Life expectancy data** from UNWPP2024 expressed as years left to live at the age of 5 (ex): https://population.un.org/wpp/downloads?folder=Standard%20Projections&group=Mortality. 
+2. **Gridded population data** reconstructions and projections. *dem4cli* uses data from the COMPASS project (received from Dominik Paprotny, [documentation here](https://compass-climate.eu/Public%20Deliverables/D3.1_Exposure%20datasets%20at%20multiple%20scales.pdf)), for the period 1950-2100, reconstructions until 2025 and projections thereafter, harmonized with SSP version 3.2-beta national totals for projections. Available at 0.1 or 0.5 degrees for SSP1, SSP2 and SSP3 as ancillary package data. *[TODO: make this available somewhere]*
+3. **Cohort sizes** reconstructions and projections at country level from 1950 to 2100. 
+    1) Option 1: UNWPP2024 cohort size reconstructions until 2023 and projections thereafter at single year and single age intervals. The mediuim variant best estimate is used in *dem4cli*, this is roughly similar to SSP2 fertility projections. 
+    2) Option 2: Wittgenstein Center, SSPs drivers version 3.2-beta (May 2025 release, not publicly distributed yet, request for data access). Data is available as reconstructions up to 2025 and projections thereafter, expressed for 5-year age cohorts at 5-year time snapshots. *dem4cli* supports using this data for SSP1, SSP2 or SSP3.
+4. **Country masks** 
+    1) Country shapefiles: from xx.
+    2) Subnational shapefiles: ancillary package data contains shapefiles at NUTS2 and NUTS3 level, for Europe, from xx. 
+    3) Fractional gridded country masks: from ISIpedia, (Perrette 2023, https://github.com/ISI-MIP/isipedia-countries). Not supported in *dem4cli v2*.  
+5. **Metadata on income levels and world regions** from the World Bank 2023: https://datatopics.worldbank.org/world-development-indicators/the-world-by-income-and-region.html. 
 
 ### Data availability 
 
-Data necessary to run dem4cli is available in a zenodo repository: https://zenodo.org/records/15425666 (access by request). 
+Data necessary to run dem4cli-v1 is available in a zenodo repository: https://zenodo.org/records/15425666 (access by request). 
 
 To run dem4cli, you can include the 'data' folder in the same folder as the 'population_demographics.py' script
 
@@ -28,12 +31,100 @@ To run dem4cli, you can include the 'data' folder in the same folder as the 'pop
 <SCRIPT_DIR>/data/
 ```
 
+> [!WARNING]
+> Work in progress: Preparing data to run dem4cli-v2 is in progress. 
+
 
 ## What this module does 
 
-### Part 1: Gridscale Demographics 
+You can set your settings in _settings.py
 
-WCDE cohort size estimates are linearly interpolated from age-brackets to exact ages, correcting such that the mean is preserved, and then linearly interpolated from snapshots every 5 years to yearly values, so that you have a cohort size value for each exact age each year. Then, using the fractional country masks the proportion of cohort size in each country each year is applied to the gridded population of that country, assuming the cohort proportions are constant across the country. The population totals from the gridded population data are thus conserved (with ~0.03-0.05% of population lost due to mismatch between the countries covered by WCDE and those available in fractional country masks). 
+
+```
+flags = {}
+
+flags['version'] = 2 
+                                    # v1 
+                                    # v2 : new gridded population and cohortsize data 
+
+
+flags['pop_resolution'] = 0.5       # 0.1 or 0.5 degrees (regular grid) for v2, only 0.5 degrees for v1 
+
+```
+
+> [!WARNING]
+> make this an init function so users dont have to go into _settings.py ! 
+
+> [!WARNING]
+> Clean up the v2/v1 situation
+
+### Part 1: Demographic data preprocessing 
+
+UNWPP2024 life expectancy data is turned from life expectancy expressed as years left to live at the age of 5 (e(x)) into  life expectancy at birth, neglecting child mortality, by subtracting 5 from the calendar year and adding 5 years to the life expectancy. Period life expectancy is turned into cohort life expectancy, by adding 6 to the life expectancy value based on the lags theory in Goldstein & Wachter (2006) "Relationships between period and cohort life expectancy: Gaps and lags".
+
+If using cohort sizes from WCDE, estimates are linearly interpolated from 5-year age-brackets to exact ages, correcting such that the mean is preserved, and then linearly interpolated from snapshots every 5 years to yearly values, so that you have a cohort size value for each exact age each year. If using cohort sizes from UNWPP2024 this is not necessary as data is provided for exact ages/years. 
+
+Gridded population data, country masks and country metadata are opened and all objects are filtered and harmonized to be obtained for matching countries and on the same grid. Optionally, all demographic objects can be filtered/cropped based on a bounding box. 
+
+You can run this as, e.g.:
+
+```
+from population_demographics_v2 import * 
+
+d_countries = preprocess_all_country_data(
+
+    dir_cohortsizes = dir_cohortsizes,                  # cohort size data
+    ssp=2, 
+                                            
+    filepath_lifeexpectancy = filepath_lifeexpectancy,  # life expectancy data
+    start_birthyear=1950,
+    end_birthyear=2025, 
+
+    dir_population= dir_population,                     # gridded pop data 
+    startyear=1950,
+    endyear=2100,
+    bbox = None,                                        # option to provide a bounding box
+
+    filepath_countrymask = filepath_countrymask,        # country masks 
+    
+    filepath_lookuptable = filepath_lookuptable,        # country list filtering
+    filter_countries=True,
+    worldbank_filter=True, 
+
+    )
+```
+
+This returns a dictionary that can be unpacked as 
+
+```
+
+df_countries = d_countries['info_pop']
+da_countrymasks = d_countries['borders'] 
+da_regions = df_countries['region'].unique()
+da_population = d_countries['population_map']
+df_life_expectancy_5 = d_countries['life_expectancy_5']
+da_cohort_size = d_countries['cohort_size']
+
+```
+
+
+ ### Part 2: Land fraction exposed & Lifetime exposure
+ 
+> [!WARNING]
+> Work in progress
+
+Users can flexibly load preprocessed annual gridded climate hazard data. This data can be binary (yes/no hazard occurrence during the year) or can represent the number of exceedances of a threshold per year. 
+
+The location of this data should be in [XX LOCATION], with the folder structure matching [XX FOLDER STRUCTURE]
+
+*dem4cli* can be used to 
+
+
+
+
+### Part 3: Gridscale Demographics (only tested for dem4cli-v1)
+
+Using the fractional country masks the proportion of cohort size in each country each year is applied to the gridded population of that country, assuming the cohort proportions are constant across the country. The population totals from the gridded population data are thus conserved (with ~0.03-0.05% of population lost due to mismatch between the countries covered by WCDE and those available in fractional country masks). 
 
 Option to output separate variables for urban, rural and total population.
 
@@ -48,13 +139,5 @@ da_pop_demographics_ssp3 = population_demographics_gridscale_global(startyear=20
                                                                     urbanrural=False) 
 ```
 
-
- ### Part 2: Lifetime exposure
- 
 > [!WARNING]
-> 2024 update is work in progress, updating to UNWPP2024:
-> - turns UNWPP2019 from life expectancy expressed as years left to live at the age of 5 (ex) into  life expectancy at birth, neglecting child mortality, by subtracting 5 from the central year of the estimate
->  - turns the period life expectancy into cohort life expectancy, by adding 6 to the life expectancy value based on the lags theory in Goldstein & Wachter (2006) "Relationships between period and cohort life expectancy: Gaps and lags"
->  - interpolates linearly the life expectancy data to get it for each exact year instead of every 5 years (note: this is not corrected to remain mean-preserving).
->  - Old data: UN World Population Prospects 2019 life expectancy data at 5 years old from 1950 to 2020 per country (as average in 5-year brackets) (https://population.un.org/wpp/Download/Standard/Mortality/)
-
+> Development for v2 is work in progress

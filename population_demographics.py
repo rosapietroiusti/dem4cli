@@ -2,729 +2,1110 @@
 Demographics4Climate : Population and demographics for climate science analysis
 ----------------------------------------------
 
-2024 Update
-
-Calculate gridscale demographics based on 
-- gridded population from ISIMIP2/ISIMIP3
-- cohort sizes from WCDE
-- metadata on countries from ISIMIP2/3, WCDE, isipedia, world bank... 
+Update 2025 with new data 
 
 To do
-Code slightly to clean up
-test for isimip2 and 3 
-make final wrapper function
-remove geojson if not necessary and edit match countrynames to use mask instead 
-
+> understand how best to deal with having v1 and v2... e.g. 
+    - have only one pop_demographics file but make flags, outside of functions 
+    or inside functions saying which functions get loaded.... 
+    - remove v1? 
 """ 
+#%%
 
+import glob, os, re, sys
+import warnings
+from math import ceil
 import numpy as np
 import xarray as xr
 import pandas as pd
-import geopandas as gpd # can maybe delete if i dont open geojson in the end 
-from scipy import interpolate
-import glob, os, re, sys
-import warnings
-import openpyxl 
+import geopandas as gpd
+import regionmask
+from shapely.geometry import box
+
+from ._utils import *
+from ._settings import *
+
+#%%
+# ---------------------------------
+# 1. Metadata 
+# ---------------------------------
 
 
-script_dir = os.path.abspath( os.path.dirname( __file__ ) )
-
-
-# flag 
-
-# filepath_Luke
-# filepath_Rosa 
-
-
+@timeit
 def load_country_metadata(
-    filepath_isimip_countries = os.path.join(script_dir, 'data/country-masks/isipedia-countries/countryData.json'),
-    filepath_world_bank = os.path.join(script_dir, 'data/income-groups/world_bank/CLASS.xlsx'),
-    keep_names='isimip',
-    keep_stats=False,
-
+    filepath_world_bank = filepath_world_bank_meta, # what year is this from?
+    filepath_lookuptable=filepath_lookuptable,
+    data_source_cohorts=flags['cohort_sizes_source'],
+    worldbank_filter=True,
 ):
     """
-    load country list from isipedia-coutries (country masks metadata files from Perette 2023, https://github.com/ISI-MIP/isipedia-countries). For 195 official/observer UN countries. 
-    and metadata from worldbank.
+    load country list metadata from worldbank (218 countries) - see what year this classification is from
 
     Input
-        keep_names (str) what country names to keep, can be 'isimip', 'world_bank', 'both'  
-        filepath_isimip_countries
-        filepath_world_bank
-        keep stats (Bool) from isimip_countries 
+        filepath_world_bank (str) 
+        filepath_lookuptable (str)
+        data_source_cohorts (str): 'UNWPP2024' or 'WCDE'
     
     Returns
-        df_metadata: table with country name, ISO3 code, country code, region and income group, where available
+        df_metadata (df):       country name, ISO3 code, country code, region, income group 
+                                filtered based on life expectancy and cohort size data availability 
+                                and if world_bank filter is True also based on WB categorization
     
     """
 
-    # open isimip metadata  
-    df_isimip_metadata = pd.read_json(filepath_isimip_countries).replace(-9999, np.nan)
-    # open world bank metadata
-    df_wb_countries = pd.read_excel(filepath_world_bank, sheet_name=0)
-    # merge keep list of countries from isimip and info from world bank
-    df_merge = df_isimip_metadata.merge(df_wb_countries, how='inner',left_on='country_iso3', right_on='Code')
+    # 1) World Bank data
 
-    # keep only some of the info and clean up column names 
-    if keep_names =='isimip':
-        keep_cols = ['country', 'Code', 'country_code','Region', 'Income group']
-        d_rename = {'Code':'country_iso3', 'Region':'region', 'Income group': 'income_group'}
+    # open world bank categorization: 218 countries total
+    df_metadata = pd.read_excel(filepath_world_bank, sheet_name=0)
+    # get rid of regions
+    df_metadata = df_metadata[~df_metadata['Region'].isna()]
+    # rename
+    keep_cols =['Economy', 'Code', 'Region', 'Income group']
+    d_rename={
+        'Economy':'country',
+        'Code':'abbreviation', 
+        'Region':'region',
+        'Income group': 'incomegroup'}
+    df_metadata = df_metadata[keep_cols].rename(columns=d_rename) 
+
+
+    # 2) Lookup table : cohort size and life expectancy
+
+    # open lookup table
+    df = pd.read_csv(filepath_lookuptable)
+
+    # overlap of cohort size (WPP/WCDE) and life expectancy (WPP) data
+    if data_source_cohorts == 'WCDE':
+        # 201 countries
+        df_overlap = df[
+                        (df[["SSP name", "WPP name"]].notna().all(axis=1)) &
+                        (df["Data availability"] == "Full historical + SSP")
+                    ].reset_index(drop=True)
+    elif data_source_cohorts == 'UNWPP2024':
+        # 236 countries
+        df_overlap = df[
+                        (df[["SSP name", "WPP name"]].notna().all(axis=1))
+                    ].reset_index(drop=True)
+    else:
+        raise ValueError("data_source_cohorts must be WCDE or UNWPP2024")
+
+    df_overlap = df_overlap[["SSP name", "WPP name", "ISO numeric","ISO alpha-2", "ISO alpha-3"]]
+
+
+    if worldbank_filter:
+        # only include countries that are also in WB categorization
+        # and have life expectancy and cohort size data
+        # 217 with UNWPP cohorts (lose Channel Islands, data available as Jersey/Guernsey)
+        # 195 with WCDE
+        df_metadata_filtered = df_metadata.merge(
+            df_overlap, how='inner', left_on='abbreviation', right_on='ISO alpha-3'
+            ).reset_index(drop=True
+            ).rename(columns={ 
+                'ISO numeric': 'country_code', 
+                'ISO alpha-2': 'ISO2',
+                'WPP name':'name' })
+
+    else: 
+        # include all countries that have all demographic data even if not in WB categorization
+        # 236 with UNWPP
+        # 201 with WCDE
+        df_metadata_filtered = df_metadata.merge(
+            df_overlap, how='right', left_on='abbreviation', right_on='ISO alpha-3'
+            ).reset_index(drop=True
+            ).drop(columns='abbreviation'
+            ).rename(columns={
+                'ISO alpha-3':'abbreviation', 
+                'ISO alpha-2': 'ISO2',
+                'ISO numeric': 'country_code', 
+                'WPP name' : 'name' })
+
+    # get only useful columns
+    df_metadata_filtered = df_metadata_filtered[[
+        'abbreviation',  'ISO2', 'region', 'incomegroup', 'country_code', 'SSP name', 'name'   
+        ]]
         
-    elif keep_names == 'world_bank':
-        keep_cols =['Economy', 'Code', 'country_code','Region', 'Income group']
-        d_rename={'Economy':'country','Code':'country_iso3', 'Region':'region', 'Income group': 'income_group'}
-        
-    elif keep_names == 'both':
-        keep_cols=['country','Economy', 'Code', 'country_code','Region', 'Income group']
-        d_rename={'Economy':'country_wb','Code':'country_iso3', 'Region':'region', 'Income group': 'income_group'}     
-
-    if keep_stats == True:
-        keep_cols=keep_cols+list(df_isimip_metadata.columns[3:])
-
-    df_metadata = df_merge[keep_cols].rename(columns=d_rename) #.head(196) # 'Economy', 
-        
-    return df_metadata
+    return df_metadata_filtered.set_index('name', drop=False)
 
 
 
+# ---------------------------------
+# 2. Cohort sizes
+# ---------------------------------
 
 
 
-# COULD DELETE THIS ! 
-def load_country_stats(
-    filepath_isimip_stats = os.path.join(script_dir, 'data/country-masks/isipedia-countries/countryprofiledata.json')
-                      ):
-    """
-    Load statistics for 195 official/observer UN countries from isipedia-countries. 
-    """
-
-    df_isimip_stats = pd.read_json(filepath_isimip_stats).T.reset_index(drop=True).replace(-9999, np.nan).rename(columns={'iso3':'country_iso3'})
-
-    return df_isimip_stats
-
-
-
-
-
-
-
+@timeit
 def load_cohort_sizes( 
-    filepaths_wcde = [os.path.join(script_dir, 'data/cohort-sizes/WCDE/wicdf_ssp1.csv'), 
-                      os.path.join(script_dir, 'data/cohort-sizes/WCDE/wicdf_ssp2.csv'), 
-                      os.path.join(script_dir, 'data/cohort-sizes/WCDE/wicdf_ssp3.csv')],
-                      ssp = 2,
-                      by_sex = False
+    dir_cohortsizes = dir_cohortsizes,
+    data_source = flags['cohort_sizes_source'], # 
+    ssp = 2,
+    by_sex = False,
 ):
     """
-    load population size per age cohort from Wittgenstein Center Data Explorer (source: http://dataexplorer.wittgensteincentre.org/wcde-v2/)
+    load population size per age cohort from Wittgenstein Center Data Explorer.
+    
+    Version 1: WCDE v2 (source: http://dataexplorer.wittgensteincentre.org/wcde-v2/)
+
+    Version 2: version 3.2 beta (for CMIP7)
 
     data description: Population Size (000's)
-    De facto population in a country or region, classified by sex and by five-year age groups. Available in all scenarios and at all geographical scales. For each country data is sorted first by age cohort (0-4, 4-9...). So all the first data refers to the 0-4 age cohort. 
+    De facto population in a country or region, classified by sex and by five-year age groups. 
+    Available in all scenarios and at all geographical scales. 
+    For each country data is sorted first by age cohort (0-4, 4-9...). 
     Then they give the population size of that cohort at a snapshot every 5 years (1950, 1955, 1960...).
     Here we assign the data to the central age cohort (i.e. 0-4 assigned to 2).
     
     Input
-        filepaths_wcde (str): path to csv files for different ssps
-        sel_ssp (int): 1,2 or 3 for ssp1, ssp2, ssp3
-        by_sex (Bool): TODO (data is available male/female)
+        dir_cohortsizes (str):      path to cohortsize files
+        data_source (str):          'WCDE' or 'UNWPP2024' 
+        ssp (int):                  1,2 or 3 for ssp1, ssp2, ssp3 (only if data_source == 'WCDE')
+        by_sex (Bool):              TODO (data is available male/female) - in version 2 this is automatic
+        
 
     Returns
-        df_cohort_sizes (df): rows are countries, columns are a cohort's (e.g. age=2) 
-                                size each year, then the next cohort (columns labelled e.g. 2_1950 age=2, year=1950)
+        df_cohort_sizes (v1: df, v2: da):   v1: rows are countries, columns are a cohort's (e.g. age=2) 
+                                            size each year, then the next cohort 
+                                            (columns labelled e.g. 2_1950 age=2, year=1950) 
+                                            v2: data array indexed by age 
         ages (arr) : central year of interval (2,7...102)
         years (arr) : years we have data for (1950, 1955...2100)
+
+    Note: 
+    - in v2 its a da not a df !!! TODO: change version 1 so it also gives a da?  
     """
 
     def convert_age_range(age):
         if age == '100+':
             return 100
         else:
-            match = re.match(r'(\d+)--\d+', age)
+            match = re.match(r'(\d+)-{1,2}(\d+)', age)
             if match:
                 return int(match.group(1))
             else:
                 return int(age)
-            
+    
+    print(f'loading cohort sizes from {data_source}')
 
-    # open wcde cohort size file 
-    filepath = filepaths_wcde[ssp-1]
-    df_raw = pd.read_csv(filepath, header=7) # population is in 000's
+    if flags['version'] == 1:
 
-    # total national population through time (rows = countries with names from WCDE, check they match, columns = years)
-    df_pop_national = df_raw[(df_raw['Sex'] == 'Both') & (df_raw['Age'] == 'All')][['Area', 'Year', 'Population']].pivot(index="Area", columns="Year", values="Population")
+        if not data_source == 'WCDE':
+            print(f'error method cohort size undefined in v1 for {data_source}')
 
-    # cohort size specific
-    if by_sex == False:
+        else:
 
-        # select only relevant rows and cols
-        df = df_raw[(df_raw['Sex'] == 'Both') & (df_raw['Age'] != 'All')][['Area', 'Year', 'Age', 'Population']]
-        
-        # central year in age bracket e.g. 0-4 becomes 2, 5-9 becomes 7 
-        df['Age'] = df['Age'].apply(convert_age_range) + 2 
-              
-        # Initialize an empty DataFrame for the final result
-        df_cohort_sizes = pd.DataFrame()
-        # Get unique ages
-        ages = df['Age'].unique()
-        years = df['Year'].unique()
-        
-        # Loop through each age and pivot the data
-        for age in ages:
-            subset = df[df['Age'] == age].pivot(index='Area', columns='Year', values='Population')
-            subset.columns = [f'{age}_{year}' for year in subset.columns] # name the columns e.g. 2_1950
-            if df_cohort_sizes.empty:
-                df_cohort_sizes = subset
+            # open wcde cohort size file 
+            filepath = dir_cohortsizes+f'/wicdf_ssp{ssp}.csv'
+            df_raw = pd.read_csv(filepath, header=7) # population is in 000's
+
+            if not by_sex:
+
+                # select only relevant rows and cols
+                df = df_raw[(df_raw['Sex'] == 'Both') & (df_raw['Age'] != 'All') & (df_raw['Area'] != 'World')][[
+                    'Area', 'Year', 'Age', 'Population'
+                    ]]
+                
+                # central year in age bracket e.g. 0-4 becomes 2, 5-9 becomes 7 
+                df['Age'] = df['Age'].apply(convert_age_range) + 2 
+                    
+                # Initialize an empty DataFrame for the final result
+                df_cohort_sizes = pd.DataFrame()
+                # Get unique ages
+                ages = df['Age'].unique()
+                years = df['Year'].unique()
+                
+                # Loop through each age and pivot the data
+                for age in ages:
+                    subset = df[df['Age'] == age].pivot(index='Area', columns='Year', values='Population')
+                    subset.columns = [f'{age}_{year}' for year in subset.columns] # name the columns e.g. 2_1950
+                    if df_cohort_sizes.empty:
+                        df_cohort_sizes = subset
+                    else:
+                        df_cohort_sizes = df_cohort_sizes.join(subset, how='outer')
+
             else:
-                df_cohort_sizes = df_cohort_sizes.join(subset, how='outer')
+                
+                pass
+                # to develop by sex 
+
+    elif flags['version'] == 2:
+
+        if data_source == 'WCDE': # cohort sizes from SSP projections v3.2-beta
+
+            filepath = dir_cohortsizes+'/ssp_basic_drivers_release_3.2.beta_full.xlsx'
+            df = pd.read_excel(filepath, sheet_name=1)
+
+            # Exclude rows where 'region' contains (R<number>), i.e. world regions
+            df = df[~df['Region'].str.contains(r"\(R\d+\)", regex=True, na=False)]
+
+            # Keep only "Population|Male|Age <age>" or "Population|Female|Age <age>"
+            population_pattern = (r"^Population\|(Male|Female)\|Age\s(\d{1,2}(-\d{1,2})?|100\+)$")
+            df = df[df['Variable'].str.contains(population_pattern, regex=True, na=False)]
+
+            # Extract sex and age from Variable
+            df['sex'] = df['Variable'].str.extract(r"^Population\|(Male|Female)", expand=False)
+            df['age'] = df['Variable'].str.extract(r"Age\s([\d\+]+(?:-\d+)?)", expand=False)
+
+            # Melt year columns to long format
+            year_cols = [c for c in df.columns if re.match(r"^\d{4}$", str(c))]
+            df_long = df.melt(
+                id_vars=['Region', 'sex', 'age','Scenario'],
+                value_vars=year_cols,
+                var_name='time',
+                value_name='population'
+            )
+            # clean 
+            df_long['time'] = df_long['time'].astype(int)
+            df_long['Scenario'] = df_long['Scenario'].replace({'Historical Reference': 'historical'})
+
+            # central year in age bracket e.g. 0-4 becomes 2, 5-9 becomes 7 
+            df_long['age'] = df_long['age'].apply(convert_age_range) + 2 
+
+            # make into a data array for easy indexing 
+            da = df_long.set_index(['Region', 'time', 'age', 'sex', 'Scenario']).to_xarray()['population']
+            da = da.rename({'Region':'country', 'Scenario':'ssp'})
+
+            # select SSP and merge historical + SSP
+            da = da.sel(ssp=['historical', f'SSP{ssp}']).max(dim="ssp") * 1000 # data provided as millions, convert to thousands
+
+            # get ages and years
+            ages = da.age.values
+            years = da.time.values
+
+            if not by_sex:
+                da = da.sum(dim='sex') 
+
+            df_cohort_sizes = da.where(da.country != 'World', drop=True) # remove 'World'
+    
+
+        elif data_source == 'UNWPP2024': # cohort sizes from UNWPP2024 historical estimates and median projections
+
+            filepath = dir_cohortsizes+'/WPP2024_POP_F01_1_POPULATION_SINGLE_AGE_BOTH_SEXES.xlsx'
+
+            df_list = []
+
+            for sheet in [0,1]: # sheet 0 has historical estimates, sheet 1 has projections
+                df_unwpp_raw = pd.read_excel(filepath, 
+                sheet_name=sheet,
+                skiprows=16) # make this more flex 
+        
+                # load data and select only data you want
+                df_unwpp = df_unwpp_raw[df_unwpp_raw['Type']=='Country/Area'].rename( # get rid of World/region/subregion, keep only countries 
+                        columns={'Region, subregion, country or area *':'country', '100+':100, 'Year':'time', 'age':'ages'}) # make this more flex 
+                cols = df_unwpp.columns
+                idxs = [i for i, col in enumerate(cols) if col in ('country', 'time') or (isinstance(col, int) and 0 <= col < 101)] # cohort size each age each year
+                df_unwpp = df_unwpp.iloc[:, idxs]
+                df_unwpp['time'] = df_unwpp['time'].astype(int)
+
+                df_list.append(df_unwpp)
+            
+            # concat historical and projections
+            df_unwpp = pd.concat(df_list, axis=0)
+
+            # convert to data array 
+            df_indexed = df_unwpp.set_index(['country', 'time'])
+            da = df_indexed.to_xarray()
+            da = da.to_array(dim='ages').transpose("country", "time", "ages").astype(float)   #.rename({'age':'ages'})
+            da = da.assign_coords(ages=[int(a) for a in da.ages.values])  # convert ages to ints
+
+            # get ages and years
+            ages = da.ages.values
+            years = da.time.values
+
+            df_cohort_sizes = da # TODO: rename this, its not a df anymore
+
+
+    return df_cohort_sizes, ages, years 
+
+
+
+@timeit
+def interpolate_cohortsize_countries(
+    df_cohort_sizes,
+    cohort_ages,
+    cohort_years,
+    data_source = flags['cohort_sizes_source'],
+    extend_method = 'linear',  # linear extends with constant value, slinear does spline linear extraplation
+    startyear= 1950,
+    endyear = None, # should be last birthyear of interest (2025) + max life expectancy 
+): 
+    """
+    Interpolate cohortsizes from 5 year age brackets to year to year - only necessary for SSP data 
+    """
+
+    #set new coordinates for after interpolation - check you want this & put in flags at start or something !! 
+    ages_interpn_cohorts =  np.arange(0,105) 
+    years_interpn_cohorts = np.arange(startyear,endyear+1)
+
+    if not data_source == 'UNWPP2024':
+
+        # keep all possible countries (better, you lose less places)
+        df_cohort_size_filter = df_cohort_sizes 
+        
+        def distribute_error_across_years(df_y_values, df_y_mean_bracket, bracket_size): 
+            # for a single year / single country in the dataset distribute error in age bracket
+            
+            # ignore warnings, we get rid of nans later with the nansum
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                
+                # reshape df to array, each row is a bracket, each column is a specific age in that bracket 
+                y_values = np.reshape(df_y_values.values, (len(df_y_values)//bracket_size, bracket_size)) #nrows, ncols
+                # calculate interpolation error over the bracket as the sum of errors
+                delta_bracket = np.sum(y_values - df_y_mean_bracket.values[:, np.newaxis], axis=1) # sums along row
+                # calculate relative weights as the value divided by the sum of all values in the bracket
+                sum_over_years = np.sum(y_values, axis=1)
+                weights = y_values / sum_over_years[:, np.newaxis]
+                # compute correction for each y value
+                delta_i = weights * delta_bracket[:, np.newaxis]
+                # correct the y values 
+                y_corrected = np.nansum(np.dstack((y_values,-delta_i)),2).reshape(-1)
+                
+            return y_corrected
+
+        if flags['version'] == 1 : 
+            wcde_years, wcde_ages, wcde_country_data = cohort_years, cohort_ages, df_cohort_size_filter.values 
+            countries = df_cohort_size_filter.index
+
+        elif flags['version'] == 2 : 
+            wcde_years, wcde_ages = cohort_years, cohort_ages # can get this from data itself - don't need to be arguments
+            countries = df_cohort_size_filter.country.values # its not a df its a da in v2! 
+        
+        # initialise dictionary to store cohort sizes dataframes per country with years as rows and ages as columns
+        d_cohort_size = {}
+        
+        # loop over countries
+        print('interpolating cohort sizes per country')
+        for i,name in enumerate(countries):
+            # extract population size per age cohort data from WCDE file and linearly interpolate from 5-year WCDE blocks to pre-defined birth year
+            
+            if flags['version'] == 1 : 
+                wcde_per_country = np.reshape(wcde_country_data[i,:],((len(wcde_ages),len(wcde_years)))) 
+                wcde_per_country_df = pd.DataFrame(
+                    wcde_per_country,
+                    index=wcde_ages,
+                    columns=wcde_years
+                )
+            elif flags['version'] == 2 : 
+                wcde_per_country_df = df_cohort_size_filter.sel(country=name).to_pandas().T
+                # every row is an age group (len 21), every column is a year (len 31)
+
+            # Note: now using dataframes to do reindexing and interpolation (see how much slower this makes it cfr. to numpy
+            # could do with numpy interpolate.griddata if you accept that ages 0-2 are not interpolated but held constant)
+
+            # interpolate per ages
+            wcde_per_country_df = wcde_per_country_df.reindex(ages_interpn_cohorts)
+            wcde_per_country_intrp = wcde_per_country_df.astype('float').interpolate(
+                    method=extend_method, # original 'linear' filled end values with constants; slinear calls spline linear interp/extrap from scipy interp1d - check if this is ok 
+                    limit_direction='both',
+                    fill_value='extrapolate',
+                    axis=0
+                )
+            # set negative numbers to zero
+            wcde_per_country_intrp[wcde_per_country_intrp<0]=0
+            # fix the not mean preserving issue
+            wcde_per_country_intrp_correct = wcde_per_country_intrp.copy()
+            for y in wcde_years:
+                wcde_per_country_intrp_correct.loc[:,y] = distribute_error_across_years(
+                    wcde_per_country_intrp.loc[:,y], # interpolated values
+                    wcde_per_country_df.dropna().loc[:,y], # true mean
+                    bracket_size=5) # bracket size 
+            
+            # check for neg numbers
+            if (wcde_per_country_intrp_correct < 0).any().any():
+                print('after interpolation and mean-preserving correction there are some neg numbers in {}, {}, setting them to zero'.format(i,name))
+                # set them to zero
+                wcde_per_country_intrp_correct[wcde_per_country_intrp_correct<0]=0
+        
+            # interpolate between years
+            wcde_per_country_df = wcde_per_country_intrp_correct.transpose().reindex(years_interpn_cohorts)
+            wcde_per_country_intrp_years = wcde_per_country_df.astype('float').interpolate(
+                    method=extend_method, # original 'linear' filled end values with constants; slinear calls spline linear interp/extrap from scipy interp1d
+                    limit_direction='both',
+                    fill_value='extrapolate',
+                    axis=0
+                )
+            d_cohort_size[name] = wcde_per_country_intrp_years / 5 # divide by 5 for 5-year age groups
+        
+        #  make a data array with the information from all the countries together
+        da_cohort_size = xr.DataArray(
+            np.asarray([v for k,v in d_cohort_size.items()]), # see whether to include nan countries here
+            coords={
+                'country': ('country', countries),
+                'time': ('time', years_interpn_cohorts),
+                'ages': ('ages', ages_interpn_cohorts),
+            },
+            dims=[
+                'country',
+                'time',
+                'ages',
+            ],
+            name='cohort_size'
+             )
 
     else:
-        pass
-        # TO DEVELOP ! BY SEX ! 
-    
-    return df_cohort_sizes, ages, years
+
+        if extend_method == 'linear':
+
+            # Reindex and forward-fill
+            da_cohort_size = df_cohort_sizes.reindex(time=years_interpn_cohorts, method="ffill").rename('cohort_size') # dont interpolate ages here or will change totals
+        
+        else:
+
+            print(f'Error {extend_method} undefined for {data_source}')
+
+    return da_cohort_size
+
+
+# ---------------------------------
+# 3. Gridded population and country masks
+# ---------------------------------
 
 
 
-
+@timeit
 def load_population(
-    dir_population=os.path.join(script_dir, 'data/gridded-pop/'), 
-    startyear=1850,
+    dir_population= dir_population, 
+    startyear=1950,
     endyear=2100,
-    ssp=3,
+    ssp=2,
     urbanrural=False,
-    chunksize=100
+    bbox=None, 
 ):
     """
-    Load gridded population reconstructions (histsoc) + projections (SSPs) from ISIMIP. 
-    Gridded population density at 0.5 degrees, annual expressed as number of people. 
-    ISIMIP2b has histsoc until 2005. ISIMIP3b has histsoc until 2021 (duplicated from ISIMIP3a), 
-    then from Gao et al. 2020 (https://doi.org/10.5065/D60Z721H AND https://doi.org/10.7927/q7z9-9r69),
+    Load gridded population reconstructions (histsoc) + projections (SSPs).
+    
+    Version 1: From ISIMIP3. Gridded population density at 0.5 degrees, annual expressed as number of people (count). 
+    ISIMIP3b has histsoc until 2021 (duplicated from ISIMIP3a), then from Gao et al. 2020 
+    (https://doi.org/10.5065/D60Z721H AND https://doi.org/10.7927/q7z9-9r69),
     scaled to match ISIMIP national population projections under different SSPs. 
+    Note: this has a known hist-to-ssp transition discontinuity spatially
 
-    Notes: Other SSPs are available from Gao et al. but haven't been scaled to match ISIMIP - > also 5 arcmin is available too! 
-    national population totals. 
-    Did they fix the hist-to-ssp transition period? Dont think so. Fix this if important for analyses. 
+    Version 2: from COMPASS, gridded pop count data, annual. Resolution defined in settings (0.1 or 0.5). 
+    From Dominik Paprotny. 1950-2100 in historical + ssp1-5
 
     Input: 
-        filepaths to gridded population (embedded in function for now). 
-        Implemented combinations isimip3-ssp1, isimip2-ssp2, isimip3-ssp3. 
-        urbanrural: False loads only population total, True loads total, urban and rural variables 
+        dir_population:         defined in settings, based on version. 
+        urbanrural:             False loads only population total, True loads total, urban and rural variables - only available in v1
+        startyear, endyear (int)
+        ssp (int):              1,2 or 3
+        bbox (optional):        tuple or array. (latmin, latmax, lonmin, lonmax) 
     
     Returns:
         da_population: (DataArray)  gridded population density. 
-    """
 
-    if urbanrural:
-        VARs=['urban-population','rural-population','total-population']
-    else:
-        VARs='total-population'
-    
+    """
+    # Auxiliary function to slice each dataset to a particular region and time 
+    def cut_to_region_time(da):
+        # time slice
+        if da.time.dtype == 'datetime64[ns]':
+            da['time'] = da['time'].dt.year
+        else:
+            da['time'] = da['time'].astype(int) + startyear_ssp
+
+        if bbox is None:
+            return da.sel(time=slice(startyear, endyear))
+        # region slicing 
+        latmin, latmax, lonmin, lonmax = bbox 
+        #if da.lat.values[0] < da.lat.values[-1]: # check if lat is increasing or decreasing
+        if da.lat.isel(lat=0) < da.lat.isel(lat=-1):# check if lat is increasing or decreasing
+            return da.sel(
+                lat=slice(latmin, latmax), lon=slice(lonmin, lonmax), time=slice(startyear, endyear)
+                )
+        else:
+            return da.sel(
+                lat=slice(latmax, latmin), lon=slice(lonmin, lonmax), time=slice(startyear, endyear)
+                )
+
+
     # Initialize list to store datasets
     datasets = []
 
-    # Load historical data conditionally based on the start and end year
-    if startyear <= 1900:
-        da_pop_histsoc1 = xr.open_dataset(
-            os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1850_1900.nc')
-        )[VARs]
-        da_pop_histsoc1['time'] = da_pop_histsoc1['time'].dt.year
-        da_pop_histsoc1 = da_pop_histsoc1.sel(time=slice(startyear, min(endyear, 1900)))
-        datasets.append(da_pop_histsoc1)
+    if flags['version'] == 1: 
 
-    if startyear <= 2014 and endyear >= 1901:
-        da_pop_histsoc2 = xr.open_dataset(
-            os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1901_2014.nc')
-        )[VARs]
-        da_pop_histsoc2['time'] = da_pop_histsoc2['time'].dt.year
-        da_pop_histsoc2 = da_pop_histsoc2.sel(time=slice(max(startyear, 1901), min(endyear, 2014)))
-        datasets.append(da_pop_histsoc2)
+        if urbanrural:
+            VARs=['urban-population','rural-population','total-population']
+        else:
+            VARs='total-population'
+        
+        # for correct opening of times
+        startyear_ssp = 2015
 
-    # Load SSP data conditionally
-    if endyear >= 2015:
-        print(f'opening isimip3 - ssp{ssp}')
-        da_pop_sspsoc = xr.open_dataset(
-            glob.glob(os.path.join(dir_population, f'ISIMIP3/ISIMIP3b/ssp{ssp}*/population_ssp{ssp}_30arcmin_annual_2015_2100.nc'))[0],
-            decode_times=False
-        )[VARs]
-        da_pop_sspsoc['time'] = np.array([year for year in np.arange(2015, 2101)])
-        da_pop_sspsoc = da_pop_sspsoc.sel(time=slice(max(startyear, 2015), endyear))
-        datasets.append(da_pop_sspsoc)
+        # Load historical data conditionally based on the start and end year
+        if startyear <= 1900:
+            da_pop_histsoc1 = xr.open_mfdataset(
+                os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1850_1900.nc'),
+                combine='nested',
+                concat_dim='time',
+                decode_coords='all',
+                preprocess=cut_to_region_time
+            )[VARs]
+            datasets.append(da_pop_histsoc1)
+
+        if startyear <= 2014 and endyear >= 1901:
+            da_pop_histsoc2 = xr.open_mfdataset(
+                os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1901_2014.nc'),
+                combine='nested',
+                concat_dim='time',
+                decode_coords='all',
+                preprocess=cut_to_region_time
+            )[VARs]
+            datasets.append(da_pop_histsoc2)
+
+        # Load SSP data conditionally
+        if endyear >= 2015:
+            print(f'opening isimip3 - ssp{ssp}')
+            da_pop_sspsoc = xr.open_mfdataset(
+                glob.glob(os.path.join(dir_population, f'ISIMIP3/ISIMIP3b/ssp{ssp}*/population_ssp{ssp}_30arcmin_annual_2015_2100.nc'))[0],
+                combine='nested',
+                concat_dim='time',
+                decode_times=False,
+                preprocess=cut_to_region_time
+            )[VARs]
+            da_pop_sspsoc['time'] = np.array([year for year in np.arange(2015, 2101)])
+            da_pop_sspsoc = da_pop_sspsoc.sel(time=slice(max(startyear, 2015), endyear))
+            datasets.append(da_pop_sspsoc)
+
+
+    elif flags['version'] == 2: 
+
+        VARs='Population_count'
+        startyear_ssp = 2025 
+
+        if startyear <= 2025:
+            print('opening compass - historical')
+            da_pop_histsoc = xr.open_mfdataset(
+                sorted(glob.glob(os.path.join(dir_population, 'historical/Population_count_*_historical.nc'))),
+                combine='nested',
+                concat_dim='time',
+                decode_coords='all',
+                preprocess=cut_to_region_time,
+            )[VARs]
+            datasets.append(da_pop_histsoc)
+
+        # Load SSP data 
+        if endyear >= 2026:
+            print(f'opening compass - ssp{ssp}')
+            da_pop_sspsoc = xr.open_mfdataset(
+                sorted(glob.glob(os.path.join(dir_population, f'ssp{ssp}/Population_count_*_SSP{ssp}.nc'))),
+                combine='nested',
+                concat_dim='time',
+                decode_coords='all',
+                preprocess=cut_to_region_time,
+            )[VARs]
+            datasets.append(da_pop_sspsoc)
 
     # Concatenate datasets if there are multiple
     if len(datasets) > 1:
         da_population = xr.concat(datasets, dim='time')
     else:
         da_population = datasets[0]
+
+    # extend past 2100 if necessary by filling with last year
+    if endyear>2100:
+
+        da_population = da_population.reindex(time=np.arange(startyear,endyear+1) , method="ffill")
     
-    return da_population
 
-
-
-def load_population_cut_to_region(
-    dir_population=os.path.join(script_dir, 'data/gridded-pop/'), 
-    startyear=1850,
-    endyear=2100,
-    ssp=3,
-    urbanrural=False,
-    bbox=None
-):
-
-    # Auxiliary function to slice each dataset to a particular region with coordinates.
-    def cut_to_region_time(da):
-        if da.time.dtype == 'datetime64[ns]':
-            da['time'] = da['time'].dt.year
-        else :
-            da['time'] = (da['time'] + 2015).astype(int) # for ssp data, years since 2015 not parsed correctly
-        return da.sel(lat=slice(bbox[0], bbox[1]), lon=slice(bbox[2], bbox[3]), time=slice(startyear, endyear))
-
-
-    filepaths_hist = [
-        os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1850_1900.nc'),
-        os.path.join(dir_population, 'ISIMIP3/ISIMIP3b/histsoc/population_histsoc_30arcmin_annual_1901_2014.nc')
-    ] 
-
-    if urbanrural:
-        VARs=['urban-population','rural-population','total-population']
-    else:
-        VARs='total-population'
+    return da_population.rename('total-population')
     
-    # Initialize list to store das
-    das = []
 
-    # Import the file, concatenate years and cut for the chosen region
-    if startyear < 2015:
-        ds = xr.open_mfdataset(
-            filepaths_hist,
-            combine='nested',
-            concat_dim='time',
-            decode_coords='all',
-            preprocess=cut_to_region_time
+
+
+
+
+
+@timeit
+def load_countrymask(
+    filepath_countrymask=filepath_countrymask,
+    data_source_countrymask=flags['countrymask'],
+    df_metadata=None,       
+    da_population=None,
+    fillcoast=False, # True if you want to preprocess and fill coastal pixels to not lose coastal pops (done already in preprocessed files)
+    fix_smallislands=False, # done in preprocessed input files for 0.5, not for 0.1 - TODO: check if necessary at 0.1 or not ! 
+    bbox=None,
+    filter_countries=True,
+    ):
+    """
+    Load countrymasks - shapefile or fractional mask
+    for fractional mask there is option to fill coastal pixels so sum of fraction = 1 so coastal populations are not lost. 
+
+    Inputs:
+        filepath_countrymask (str)
+        data_source_countrymask (str):      'fractional_mask' or 'shapefile'
+        df_metadata (df):                   df with metadata, output from load_metadata function 
+        da_population (da):                 only necessary for 'shapefile', the population dataarray to make masks
+        fillcoast, fix_smallislands (bool): only for 'fractional_mask' whether to fix coastal pixels so fractions sum to one and fix small island states with errors (only coded for 0.5 deg)
+        bbox (opt, array):                  miny, maxy, minx, maxx - bbox to crop the masks to 
+        filter_countries (bool):            if True, removes from df_countries the countries not included in country_borders, and removes from country_borders the countries that aren't in df_metadata - NOTE: False is not tested 
+
+    Returns:
+        country_borders (da or gdf)
+        country_regions, country_mask (regionmask objects - only if country_borders is gdf)
+        df_countries (df)
+
+
+    """
+
+    #TODO: divide into two different functions? for frax versus shapefile? 
+
+    def cut_to_region(da, bbox):
+        # cut to a predefined region
+        latmin, latmax, lonmin, lonmax = bbox
+        if da.lat.values[0] < da.lat.values[-1]:
+            da = da.sel(lat=slice(latmin, latmax), lon=slice(lonmin, lonmax))
+        else:
+            da = da.sel(lat=slice(latmax, latmin), lon=slice(lonmin, lonmax))
+        if "country" in da.dims:
+            # compute which countries have all-NaN/0 inside the bbox and drop them 
+            mask = ~((da.isnull() | (da == 0)).all(dim=("lat","lon")))
+            return da.sel(country=mask)
+        else:
+            return da
+
+    if data_source_countrymask == 'fractional_mask':
+
+        if not fillcoast:
+            # Open data - already preprocessed
+            da_countrymasks = xr.open_dataarray(filepath_countrymask, chunks='auto')
+            if "variable" in da_countrymasks.dims:
+                da_countrymasks = da_countrymasks.isel(variable=0)
+
+        # NOTE: could delete this whole section since the data is already preprocessed 
+        if fillcoast:
+            # Open data 
+            ds=xr.open_dataset(filepath_countrymask, chunks='auto')
+            da_countrymasks = ds.to_array()
+
+            # clean variable names 
+            strings = da_countrymasks['variable'].values
+            cleaned_strings = [s[2:] if s.startswith('m_') else s for s in strings]
+            da_countrymasks['variable'] = cleaned_strings
+            # last variable is 'world', lose it 
+            da_countrymasks = da_countrymasks.isel(variable=slice(0,225))
+
+            # fill coastal pixels 
+            # sum over all countries 
+            countrymask_sum = da_countrymasks.sum(dim='variable')
+            # correct for coastal pixels where sum of fraction is less than 1, weighted multiplication for sum to equal one
+            da_countrymasks_correct = xr.where(countrymask_sum < 1, da_countrymasks * (1 / countrymask_sum ), da_countrymasks)
+            # small area sum = 2, correct for it 
+            da_countrymasks_corr = xr.where(da_countrymasks_correct.sum(dim='variable') > 1, da_countrymasks_correct/da_countrymasks_correct.sum(dim='variable'), da_countrymasks_correct)
+            da_countrymasks = da_countrymasks_corr
+
+            if fix_smallislands:  
+                # TODO change the lat indexing to be with coords!! doesnt work for 0.1 - hard coded for 0.5 deg 
+                # Fix issue in Singapore pixel, assign fraction from IOSID to SGP 
+                da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='SGP')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')].values
+                da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')] = 0
+                # Fix it also in Mauritius 
+                da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='MUS')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')].values
+                da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')] = 0
+            
+            da_countrymasks = da_countrymasks.rename({'variable':'country'})
+
+        if bbox:
+            da_countrymasks = cut_to_region(da_countrymasks, bbox)
+
+        if filter_countries: 
+            # remove from df_countries those that are not in mask (total 209 countries )
+            df_countries = df_metadata.merge(pd.DataFrame(da_countrymasks.country.to_pandas().rename('iso3_mask')), how='inner', left_on='abbreviation', right_on='country').drop(columns='iso3_mask')
+            # remove from countrymask those that are not in df_countries 
+            select = da_countrymasks.country.isin(df_countries['abbreviation'])
+            da_countrymasks = da_countrymasks.sel(country=select)
+        else:
+            print('Note option to not filter countries based on df_metadata not tested')
+
+        return da_countrymasks, None, None, df_countries 
+
+
+    elif data_source_countrymask == 'shapefile':
+
+        # open shapefile
+        gdf_country_borders_raw = gpd.read_file(filepath_countrymask) # len:255
+        df_countries = df_metadata
+
+        #rename from incorrect in shapefile to correct in Worldbank. 
+        d_rename={'KOS':'XKX', 'SDS':'SSD', 'PSX':'PSE'}
+        gdf_country_borders = gdf_country_borders_raw.replace({"ADM0_A3": d_rename})
+
+        if filter_countries:
+            # keep only if in both world bank and gdf : 217 countries 
+            gdf_country_borders = gdf_country_borders.merge(
+                df_metadata, 
+                how='inner',
+                left_on='ADM0_A3', 
+                right_on='abbreviation'
+                )
+        else:
+            print('Error no option to not filter countries based on df_metadata')
+
+
+        # if bbox provided, crop the geodataframe and the population data  
+        if bbox:
+            latmin, latmax, lonmin, lonmax = bbox
+            box_crop = box(lonmin, latmin, lonmax, latmax)
+            gdf_country_borders = gpd.clip(gdf_country_borders, box_crop)
+
+            da_population = cut_to_region(da_population, bbox) # TODO: am i using this??? 
+
+        # create regions object and mask object
+        countries_regions = regionmask.from_geopandas(
+            gdf_country_borders, 
+            names='name', 
+            abbrevs="abbreviation", 
+            name="country"
         )
+        countries_mask = countries_regions.mask(da_population.lon, da_population.lat)
+
+        # remove countries that have zero population (not resolved in mask)
+        df_countries['population'] = np.nan 
+        for name in df_countries.index.values: 
+            if name in gdf_country_borders['name'].values:
+                # only keep countries that are resolved with mask 
+                if da_population.where(countries_mask==countries_regions.map_keys(name), drop=True).size != 0:
+                    # get mask index and get masked population in 2025 to drop countries that are not resolved with shapefile
+                    df_countries.loc[name,'population'] = da_population.sel(time=2025).where(countries_mask==countries_regions.map_keys(name), drop=True).sum().values
+        # remove countries that have zero population - total 7.6 billion people covered by 183 countries and shapefile masking (out of 8.2 billion) - use dem4cli gridscale v1 if absolute number is important at gridscale
+        df_countries = df_countries[~df_countries.loc[:, 'population'].isnull()]
         
-        # Extract the  variable from the imported dataset
-        da = ds[VARs]
+        # clean country borders dataframe for return
+        gdf_country_borders = gdf_country_borders.set_index(gdf_country_borders.name
+                                    ).loc[:,['geometry','region', 'ADM0_A3']].rename(columns={'ADM0_A3':'abbreviation'}
+                                    ).reindex(df_countries.index)
 
-        das.append(da)
 
 
-    if endyear >2015:
-        filepath_ssp = glob.glob(os.path.join(dir_population, f'ISIMIP3/ISIMIP3b/ssp{ssp}*/population_ssp{ssp}_30arcmin_annual_2015_2100.nc'))[0]
 
-        ds = xr.open_mfdataset(
-        filepath_ssp ,
-        combine='nested',
-        concat_dim='time',
-        decode_times=False,
-        preprocess=cut_to_region_time
+        return gdf_country_borders, countries_regions, countries_mask, df_countries
+
+
+
+
+
+@timeit
+def load_subnational_mask(
+    filepath_shp=None,
+    da_population=None,
+    bbox=None,
+    dict_keep=None, 
+    dict_drop=None,
+    col_name="NAME_LATN",
+    col_id= "NUTS_ID",
+    col_country='CNTR_CODE',
+    ):
+    """
+    Load subnational shapefile mask 
+
+    Inputs:
+        dict_keep (dict):       what elements of shapefile to keep, as a dictionary colname:value 
+                                e.g. {'LEVL_CODE': 2, 'CNTR_CODE': 'PT'}
+                                This does an exact match
+        dict_drop (dict):       what elements to drop as a dictionary colname:value
+                                This does a "startswith" match
+
+    Returns:
+
+    """
+
+    def make_shp(filepath_shp, dict_keep=None, dict_drop=None):
+        shp = gpd.read_file(filepath_shp)
+
+        if dict_keep:
+            for key, val in dict_keep.items():
+                vals = [val] if isinstance(val, (str, int)) else val
+                shp = shp[shp[key].isin(vals)]
+
+        if dict_drop:
+            for key, val in dict_drop.items():
+                vals = [val] if isinstance(val, (str, int)) else val
+                shp = shp[~shp[key].str.startswith(tuple(vals))]
+
+        return shp.reset_index(drop=True).to_crs("EPSG:4326")
+    
+    def cut_to_region(da, bbox):
+        # cut to a predefined region
+        latmin, latmax, lonmin, lonmax = bbox
+        if da.lat.values[0] < da.lat.values[-1]:
+            da = da.sel(lat=slice(latmin, latmax), lon=slice(lonmin, lonmax))
+        else:
+            da = da.sel(lat=slice(latmax, latmin), lon=slice(lonmin, lonmax))
+        if "country" in da.dims:
+            # compute which countries have all-NaN/0 inside the bbox and drop them 
+            mask = ~((da.isnull() | (da == 0)).all(dim=("lat","lon")))
+            return da.sel(country=mask)
+        else:
+            return da
+    
+    gdf = make_shp(filepath_shp, dict_keep=dict_keep, dict_drop=dict_drop)
+
+    if bbox:
+        latmin, latmax, lonmin, lonmax = bbox
+        # crop to same area 
+        box_crop = box(lonmin, latmin, lonmax, latmax) # not sure this is necessary?
+        gdf = gpd.clip(gdf, box_crop).reset_index(drop=True)
+        da_population = cut_to_region(da_population, bbox)  # TODO: do i really need this ?? 
+                                                            # it will make mask on grid of da_population, so it needs to be relevant to broader analysis
+                                                            # check if better to force bbox to be provided... or to alternatively not crop da_population 
+
+    # sort alphabetically based on ID (not necessary, but looks cleaner)
+    gdf = gdf.sort_values(col_id).reset_index(drop=True)
+
+    # create regions object and mask object
+    subnational_regions = regionmask.from_geopandas(
+        gdf, 
+        names=col_id, 
+        abbrevs=col_id, 
+        name=col_name
     )
+
+    subnational_mask = subnational_regions.mask(da_population.lon, da_population.lat)
+
+    gdf = gdf.loc[:,[col_id, col_country, col_name, 'geometry']].rename(
+            columns={col_id:'id', col_name:'name', col_country:'country'}
+            ).set_index('id', drop=False).rename_axis(None)
+
+    # calc population in 2025 from gridded data, to check if some regions are unresolved at the resolution
+    gdf['population'] = np.nan
+    for idx in gdf['id']:
+        gdf.loc[idx,'population'] = da_population.sel(time=2025
+        ).where(subnational_mask==subnational_regions.map_keys(idx), drop=True
+        ).sum().values
+
+    # possible to add automatic dropping of empty regions
+
+    return gdf, subnational_regions, subnational_mask
+
+
+
+# ---------------------------------
+# 4. Life expectancy 
+# ---------------------------------
+
+
+
+
+@timeit
+def load_unwpp_lifeexpectancy(
+        filepath_lifeexpectancy = filepath_lifeexpectancy,
+        start_birthyear=1950,
+        end_birthyear=2025
+):
+    """
+    Load UNWPP2024 data on e(x) = Life Expectancy at Exact Age x (ex) - Both Sexes.
+
+    The average number of remaining years of life expected by a hypothetical cohort of individuals alive at age x who would be subject during the 
+    remaining of their lives to the mortality rates of a given year. It is expressed as years. Has data from birth year 1950 to 2023. 
+
+    Keep only Country name and years left to live at age 5 e(5). 
+
+    Source: 
+    https://population.un.org/wpp/downloads?folder=Standard%20Projections&group=Mortality
     
-        # Extract the  variable from the imported dataset
-        da = ds[VARs]
+    """
+    df_list = []
 
-        das.append(da)
+    for sheet in [0,1]: # sheet 0 has reconstructions up to 2023, sheet 2 has projections
+        df_unwpp_raw = pd.read_excel(filepath_lifeexpectancy, 
+                sheet_name=sheet,
+                skiprows=16) # make this more flex 
+        
+        df_unwpp = df_unwpp_raw[df_unwpp_raw['Type']=='Country/Area'].rename(
+                columns={'Region, subregion, country or area *':'Country'}) # make this more flex 
+        
+        cols = df_unwpp.columns
+        
 
-    # Concatenate datasets if there are multiple
-    if len(das) > 1:
-        da_population = xr.concat(das, dim='time')
+        # get only life expectancy at age 5
+        idxs = [i for i, col in enumerate(cols) if col in ('Country',  'Year', 5)] # or: 'ISO3 Alpha-code'
+        # decide whether to keep country name or ISO3 
+        # probably better ISO3 ! 
+        
+        df_unwpp = df_unwpp.iloc[:, idxs].pivot(
+            index='Year',
+            columns='Country',
+            values=5)
+        
+        # years left to live of someone who is 5 years old in that year
+        
+        df_unwpp.index = df_unwpp.index.astype(int)
+
+        df_list.append(df_unwpp)
+
+    df_unwpp = pd.concat(df_list, axis=0).loc[start_birthyear:int(end_birthyear + 5)]
+
+    return df_unwpp
+
+
+
+@timeit
+def get_life_expectancies(df_unwpp,
+                         start_birthyear=1950,
+                         end_birthyear=2025):
+    
+    """
+    Takes UNWPP life expectancy data expressed as years left to live at age of 5, 
+    subtracts 5 from Year to get it at birth year but ignoring infant mortality, 
+    adds 5 to account for the 5 years of life already lived, adds 6 to account for increase 
+    in life expectancy through the life of an individual (i.e. move from "period" life expectancy to 
+    "cohort" life expectancy, see Goldstein & Wachter (2006) "Relationships between period and cohort 
+    life expectancy: Gaps and lags")
+
+    Thus get life expectancy in each year for each country at birth 
+    expressed in "cohort" way, neglecting infant mortality.
+
+    Adter end of data, extends by filling with constant value 
+
+    Inputs
+
+
+    Returns 
+
+    """
+    
+    df_life_expectancy_5 = df_unwpp.copy()
+    df_life_expectancy_5.index = df_life_expectancy_5.index-5 # year of birth: 2023 (age 5) becomes 2018 (age 0)
+    df_life_expectancy_5 = df_life_expectancy_5 + 5 + 6 
+
+    if df_life_expectancy_5.index[-1] < end_birthyear :
+        # extend for last years
+        df_life_expectancy_5_extend = df_life_expectancy_5.reindex(
+                    np.arange(start_birthyear,end_birthyear+1)).astype( 
+                    'float').interpolate() # extrapolation: fills last years constant 
+    
+        return df_life_expectancy_5_extend
     else:
-        da_population = das[0]
+        return df_life_expectancy_5.loc[start_birthyear:end_birthyear ]
+
+
+
+
+# -----------------------------------------------------
+# 5. Wrapper function demographic data country level
+# -----------------------------------------------------
+
+
+@timeit
+def preprocess_all_country_data(
+
+    filepath_lifeexpectancy = filepath_lifeexpectancy, # life expectancy data
+    start_birthyear=1950,
+    end_birthyear=2025,                 # endyear is taken from end_birthyear + max life expectancy
+
+    dir_cohortsizes = dir_cohortsizes,  # cohort size data
+    ssp=2,
+    data_source_cohorts=flags['cohort_sizes_source'],
+    extend_method='linear',             # note, slinear not implemented for UNWPP2024
+    by_sex=False,                       # NOTE by_sex not implemented
+                                            
+    dir_population= dir_population,     # gridded pop data 
+    urbanrural=False,                   # NOTE urbanrural not implemented for v2
+    bbox = None,
+
+    filepath_countrymask = filepath_countrymask,    # country masks 
+    data_source_countrymask = flags['countrymask'],
+    fillcoast=False,                    # NOTE preprocessing is already done in standard input files - TODO: add option to select shapefile or country mask
+    fix_smallislands=False,
     
-    return da_population
+    filepath_world_bank = filepath_world_bank_meta, # metadata 
+    filepath_lookuptable = filepath_lookuptable,    # country filtering
+    filter_countries=True,
+    worldbank_filter=True, 
+
+    ):
+
+    # metadata from worldbank, unwpp and availability of cohort data - filters already countries 
+    df_metadata =  load_country_metadata(filepath_world_bank = filepath_world_bank,
+                                        filepath_lookuptable=filepath_lookuptable,
+                                        data_source_cohorts = data_source_cohorts,
+                                        worldbank_filter=worldbank_filter) 
 
 
+    # load life expectancy data and clean 
+    df_unwpp = load_unwpp_lifeexpectancy(filepath_lifeexpectancy = filepath_lifeexpectancy) 
+    # go from 'period' to 'cohort' life expectancy
+    df_life_expectancy_5 = get_life_expectancies(df_unwpp,
+                                            start_birthyear=start_birthyear,
+                                            end_birthyear=end_birthyear)
 
 
+    # calculate end year as last birth year + maximum life expectancy
+    # cohort sizes are extrapolated, gridded pop data is held constant (check!)
+    endyear = ceil(max(df_life_expectancy_5.values.flatten()) + end_birthyear)
 
 
+    # loads raw cohort size from WCDE ssps or UNWPP2024 (reconstruction + projections) and cleans to keep only relevant information
+    df_cohort_sizes, ages, years = load_cohort_sizes(dir_cohortsizes, data_source=data_source_cohorts, ssp=ssp, by_sex=by_sex)
+    # for WCDE, interpolates cohort sizes from 5 year to single year and corrects to preserve mean and extends past 2100
+    # for UNWPP extends past 2100 only
+    da_cohort_size = interpolate_cohortsize_countries(
+                        df_cohort_sizes,
+                        ages,
+                        years,
+                        data_source=data_source_cohorts,
+                        extend_method=extend_method, 
+                        startyear=start_birthyear,
+                        endyear=endyear,
+                    )
 
 
+    # load gridded population data, optional cropping in space and time
+    da_population = load_population(
+                        dir_population= dir_population, 
+                        startyear=start_birthyear,
+                        endyear=endyear,  
+                        ssp=ssp,
+                        urbanrural=urbanrural,
+                        bbox = bbox ,
+                        )
 
-
-def load_countrymasks_fillcoasts(
-    filepath=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_fractional_05deg.nc'),
-    fillcoast=True,
-    fix_smallislands=True):
-
-    # Open data 
+    # open countrymasks, optional preprocessing (already done in default input files)
+    country_borders, countries_regions, countries_mask, df_countries = load_countrymask(
+                                        filepath_countrymask,
+                                        data_source_countrymask = data_source_countrymask,
+                                        df_metadata=df_metadata,
+                                        da_population = da_population,
+                                        fillcoast=fillcoast, # fill coastal pixels to not lose coastal pops
+                                        fix_smallislands=fix_smallislands, # done in preprocessed input files for 0.5, not for 0.1
+                                        bbox=bbox,
+                                        filter_countries=filter_countries,
+                                        )
     
-    ds=xr.open_dataset(filepath)
-    da_countrymasks = ds.to_array()
-
-    strings = da_countrymasks['variable'].values
-    cleaned_strings = [s[2:] if s.startswith('m_') else s for s in strings]
-    da_countrymasks['variable'] = cleaned_strings
-    # last variable is 'world', lose it 
-    da_countrymasks = da_countrymasks.isel(variable=slice(0,225))
-    # sum over all countries 
-    countrymask_sum = da_countrymasks.isel(variable=slice(0,225)).sum(dim='variable')
-
-    if fillcoast:
-        # Part 2. Correct for coastal pixels 
+    if filter_countries:
+        # life expectancy
+        df_life_expectancy_5 = df_life_expectancy_5[df_countries["name"]]
         
-        # where sum of fraction is less than 1, weighted multiplication for sum to equal one
-        da_countrymasks_correct = xr.where(countrymask_sum < 1, da_countrymasks*(1/da_countrymasks.sum(dim='variable')), da_countrymasks)
-        # small area sum = 2, correct for it 
-        da_countrymasks_corr = xr.where(da_countrymasks_correct.sum(dim='variable') > 1, da_countrymasks_correct/da_countrymasks_correct.sum(dim='variable'), da_countrymasks_correct)
-
-        da_countrymasks = da_countrymasks_correct
-
-    
-    if fix_smallislands:  
-        # Fix issue in Singapore pixel, assign fraction from IOSID to SGP 
-        da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='SGP')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')].values
-        da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')] = 0
+        # cohort sizes
+        name_cohorts = "name" if data_source_cohorts == "UNWPP2024" else "SSP name"
+        da_cohort_size = da_cohort_size.sel(country=df_countries[name_cohorts].to_list()) # rename the SSP name to the WPP name?
         
-        # Fix it also in Mauritius 
-        da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='MUS')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')].values
-        da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')] = 0
-        
-
-    return da_countrymasks
-
-
-
-def load_countrymasks_binary(
-    filepath=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_binary_exclusive_0.5deg.nc')
-):
-
-    # look again at difference of these ! 
-
-    
-    
-    ds=xr.open_dataset(filepath)
-    da_countrymasks = ds.to_array()
-
-    strings = da_countrymasks['variable'].values
-    cleaned_strings = [s[2:] if s.startswith('m_') else s for s in strings]
-    da_countrymasks['variable'] = cleaned_strings
-    # last variable is 'world', lose it 
-    da_countrymasks = da_countrymasks.isel(variable=slice(0,225))
-    
-    return da_countrymasks
-
-
-
-
-def match_country_names_all_mask_frac(
-    filepath_isimip_countries = os.path.join(script_dir, 'data/country-masks/isipedia-countries/countryData.json'),
-    filepath_world_bank = os.path.join(script_dir, 'data/income-groups/world_bank/CLASS.xlsx'),
-    filepaths_wcde = [os.path.join(script_dir, 'data/cohort-sizes/WCDE/wicdf_ssp1.csv'),
-                      os.path.join(script_dir, 'data/cohort-sizes/WCDE/wicdf_ssp2.csv'), 
-                      os.path.join(script_dir, 'data/cohort-sizes/WCDE/wicdf_ssp3.csv')],
-    filepath_mask=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks.geojson'),
-    filepath_mask_frac=os.path.join(script_dir, 'data/country-masks/isipedia-countries/countrymasks_fractional_05deg.nc'),
-):
-    """
-    A somewhat ugly function that matches country names and country codes between all data sources used. Namely, 
-    isimip_countries : 195 UN official/observer countries (from isipedia-countries)
-    world_bank : includes countries, region and income group information for 218 countries/admin units
-    wcde : 202 countries/administrative regions
-    mask (geojson): 208 countries/admin groups
-    mask (fractional mask): 225 countries/admin groups
-
-    Todo: get all info from WB not only for 195 isimip countries ! 
-    """
-
-    # load metadata from isimip and world bank
-    df_metadata = load_country_metadata(filepath_isimip_countries = filepath_isimip_countries, filepath_world_bank=filepath_world_bank, keep_names='both')
-    # load cohortsize metadata and rename column for consistency
-    df_wcde, none, none = load_cohort_sizes( filepaths_wcde = filepaths_wcde)
-    df_wcde = df_wcde.reset_index()[['Area']].rename(columns={'Area':'country_wcde'})
-    # open geojson mask 
-    df_mask =gpd.read_file(filepath_mask).iloc[:,[12,14]].rename(columns={'ISIPEDIA':'iso3_mask', 'NAME':'country_mask'})
-    # open da countrymask
-    da_frac=load_countrymasks_fillcoasts(filepath=filepath_mask_frac,fillcoast=False)
-    df_frac=da_frac['variable'].to_pandas().rename('iso3_frac') # don't actually need it here
-
-    # Step 1: Merge wcde on 'country' (isimip)
-    merged_df = df_metadata.merge(df_wcde, how='outer', left_on='country', right_on='country_wcde', indicator='merge_country')
-
-    # Step 2: Merge wcde on 'country_wb' 
-    unmatched_df = merged_df[merged_df['merge_country'] == 'left_only'].drop(columns=['country_wcde', 'merge_country'])
-    second_merge = unmatched_df.merge(df_wcde, how='left', left_on='country_wb', right_on='country_wcde', indicator='merge_country_wb')
-
-    # Combine matched results
-    final_merged_df = pd.concat([merged_df[merged_df['merge_country'] != 'left_only'], second_merge])
-    final_merged_df
-
-    # Step 3: Check for common words for remaining unmatched rows
-    remaining_unmatched = final_merged_df[final_merged_df['merge_country_wb'] == 'left_only'].copy()
-    df_wcde_tomatch = final_merged_df[ final_merged_df['merge_country']=='right_only']
-
-    def find_common_word_match(row, choices, column):
-        row_value = row[column]
-
-        # Define stopwords to ignore and minimum word length
-        stopwords = {'State','of','of)','Korea','and', 'States', 'United', 'Islands'}
-        min_length = 3
-        # Define specific mappings for manual matches
-        specific_matches = {
-            'United States': 'United States of America',
-            'Eswatini (Kingdom of)': 'Swaziland',
-        }
-        # Handle specific matches first
-        if row_value in specific_matches:
-            return specific_matches[row_value], None
-        # Clean the row value by removing stopwords and words shorter than min_length
-        row_words = set(word for word in row_value.split() if len(word) >= min_length and word not in stopwords)
-        for choice in choices:
-            choice_words = set(word for word in choice.split() if len(word) >= min_length and word not in stopwords)
-            common_words = row_words & choice_words
-            if len(common_words) >= 2:  # Check for at least two common words
-                return choice, None
-        for choice in choices:
-            choice_words = set(word for word in choice.split() if len(word) >= min_length and word not in stopwords)
-            common_words = row_words & choice_words
-            if len(common_words) == 1:  # Check for exactly one common word
-                #print(choice, common_words)
-                return choice, common_words
-        return None, None
-    
-    # Apply the function and capture matches with one common word
-    remaining_unmatched[['country_wcde', 'common_words']] = remaining_unmatched.apply(
-        lambda row: pd.Series(find_common_word_match(row, df_wcde_tomatch['country_wcde'].tolist(), 'country')), axis=1)
-    
-    # Filter rows where only one common word was found - can delete this was for checking
-    matches_with_one_word = remaining_unmatched[remaining_unmatched['common_words'].apply(lambda x: x is not None and len(x) == 1)]
-
-    # Remove the common_words column
-    remaining_unmatched = remaining_unmatched.drop(columns=['common_words'])
-
-    # Step 4: Final merge using common word matches
-    common_word_matched_df = remaining_unmatched.merge(df_wcde, how='left', on='country_wcde', indicator='merge_common_word')
-
-    # Combine all matched results
-    final_combined_df = pd.concat([final_merged_df[final_merged_df['merge_country_wb'] != 'left_only'], common_word_matched_df])
-
-    # drop duplicate rows of country_wcde that have already been assigned 
-    def drop_duplicate_assigned_rows(final_combined_df,column):
-        # Step 1: Identify and filter non-unique 'country_wcde' values
-        non_unique_country_wcde = final_combined_df['country_wcde'].value_counts()[lambda x: x > 1].index
-        non_unique_rows = final_combined_df[final_combined_df['country_wcde'].isin(non_unique_country_wcde)]
-        # Step 2: Remove rows with NaN in 'country' from the non-unique rows
-        final_combined_df = final_combined_df.drop(non_unique_rows[non_unique_rows[column].isna()].index)
-        return final_combined_df
-
-    final_combined_df = drop_duplicate_assigned_rows(final_combined_df,'country_iso3')
-
-    # Step 5: Check for a common substring of 4 characters or more for remaining unmatched rows
-    df_wcde_tomatch = final_combined_df[ final_combined_df['merge_country']=='right_only']
-    remaining_unmatched = final_combined_df[final_combined_df['merge_common_word'] == 'left_only'].copy()
-    
-    def find_common_substring_match(row, choices, column, min_length=4):
-        # Define stopwords to ignore in matching 
-        stopwords_substring = ['States','United','Republic','mini','tini','land','e of', ' of', ' of ','l Is','Islands']
-        cleaned_row_value = ' '.join([word for word in row[column].split() if word not in stopwords_substring])
-        for choice in choices:
-            cleaned_choice = ' '.join([word for word in choice.split() if word not in stopwords_substring])
-            for i in range(len(cleaned_row_value) - min_length + 1):
-                substr = cleaned_row_value[i:i+min_length]
-                if substr in cleaned_choice and substr not in stopwords_substring:
-                    #print(substr, choice) 
-                    return choice
-        return None
-    
-    remaining_unmatched['country_wcde'] = remaining_unmatched.apply(
-        lambda row: find_common_substring_match(row, df_wcde_tomatch['country_wcde'].tolist(), 'country'), axis=1)
-
-    # Step 6: Final merge using common substring matches
-    substring_matched_df = remaining_unmatched.merge(df_wcde, how='left', on='country_wcde', indicator='merge_substring')
-    
-    # Combine all matched results
-    final_combined_df = pd.concat([final_combined_df[final_combined_df['merge_common_word'] != 'left_only'], substring_matched_df])
-    final_combined_df = drop_duplicate_assigned_rows(final_combined_df,'country_iso3')
-
-    # Part 2. Include mask countries that are not in 195 country list
-
-    # Step 1: do a first outer merge of the combined df and the countries in the mask
-    # do a first outer merge with mask coutnries based on isocode
-    df_merge = final_combined_df.merge(df_mask, how='outer', left_on='country_iso3', right_on='iso3_mask',indicator='merge_country_mask')
-
-    # get unmatched countries in mask
-    unmatched_mask = df_merge[df_merge['merge_country_mask']=='right_only']
-    # get unmatched countries in wcde
-    df_wcde_unmatched = final_combined_df[ final_combined_df['merge_country']=='right_only']
-
-    # Step 2: match mask with wcde based on common name of country 
-    df_unmatched_mask = unmatched_mask.drop(columns=['country_wcde','merge_country_mask'])
-    second_merge = df_unmatched_mask.merge(df_wcde_unmatched[['country_wcde']], how='left', left_on='country_mask', right_on='country_wcde', indicator='merge_country_msk_n')
-    combined_df = pd.concat([df_merge[df_merge['merge_country_mask'] !='right_only'],second_merge])
-
-    # Step 3: find unmatched countries and match based on common substring
-    remaining_unmatched = combined_df[combined_df['merge_country_msk_n'] =='left_only'].copy()
-    final_combined_df = drop_duplicate_assigned_rows(combined_df,'country_mask')
-    df_wcde_tomatch = final_combined_df[ final_combined_df['merge_country']=='right_only']
-
-    remaining_unmatched['country_wcde'] = remaining_unmatched.apply(
-    lambda row: find_common_substring_match(row, df_wcde_tomatch['country_wcde'].tolist(), 'country_mask'), axis=1)
-
-    substring_matched_df = remaining_unmatched.merge(df_wcde, how='left', on='country_wcde', indicator='merge_substring_msk')
-
-    # combine
-    final_combined_df = pd.concat([final_combined_df[final_combined_df['merge_country_msk_n'] !='left_only'], substring_matched_df])
-    final_combined_df = drop_duplicate_assigned_rows(final_combined_df, 'country_mask')
-
-    # merge also from fractional countrymask codes
-    df_merge = final_combined_df.merge(df_frac, how='outer',left_on='iso3_mask',right_on='variable',indicator='merge_frac')
-    df_both = df_merge[df_merge['merge_frac']=='both']
-    df_unmatched = df_merge[df_merge['merge_frac']=='left_only']
-    df_tomatch = df_merge[df_merge['merge_frac']=='right_only']
-    second_merge = df_unmatched.drop(columns='iso3_frac').merge(df_tomatch['iso3_frac'], how='outer',left_on='country_iso3',right_on='iso3_frac',indicator='merge_frac2')
-
-    final_combined_df=pd.concat([df_both,second_merge])
-
-    
-    # Identify and print unmatched countries
-    unmatched_countries = final_combined_df[final_combined_df['merge_substring'] == 'left_only']
-    print("Unmatched ISIMIP countries (without WCDE data) after all merges:")
-    print(unmatched_countries[['country', 'country_wb']])
-
-    # WCDE countries unmatched
-    df_wcde_unmatched = final_combined_df[ final_combined_df['merge_country']=='right_only']
-    print("Unmatched WCDE countries after all merges:")
-    print(df_wcde_unmatched[['country_wcde']])  
-    
-    # Identify and print unmatched mask countries
-    unmatched_countries = final_combined_df[(final_combined_df['merge_substring_msk'] == 'left_only') | (final_combined_df['merge_frac2'] == 'right_only') ]
-    print("Unmatched ISIMIP mask countries (geojson + frac mask) after all merges:")
-    print(unmatched_countries[['country_mask', 'iso3_frac']])
-
-    
-    # Drop merge indicator columns
-    df_countries_matched = final_combined_df.drop(columns=['merge_country', 'merge_country_wb', 
-                                                           'merge_common_word', 'merge_substring', 
-                                                           'merge_country_msk_n', 'merge_substring_msk',
-                                                           'merge_frac','merge_frac2', # cols to drop
-                                                          ])[['country', 
-                                                              'country_wb', 
-                                                              'country_wcde', 
-                                                              'country_mask',
-                                                              'country_iso3', 
-                                                              'iso3_mask',
-                                                              'iso3_frac', 
-                                                              'country_code', 
-                                                              'region',
-                                                              'income_group']] # cols to keep 
-
-    
-    return df_countries_matched.sort_values(['country','country_wcde','country_mask']).reset_index(drop=True)
-
-
-
-
-
-
-
-
-def interpolate_cohortsize_countries(
-    df_cohort_sizes,
-    cohort_ages,
-    cohort_years,
-): 
-    """
-    """
-
-    # keep all possible countries (better, you lose less places)
-    df_cohort_size_filter = df_cohort_sizes 
-    
-    def distribute_error_across_years(df_y_values, df_y_mean_bracket, bracket_size): 
-        # for a single year / single country in the dataset distribute error in age bracket
-        
-        # ignore warnings, we get rid of nans later with the nansum
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=RuntimeWarning)
-            
-            # reshape df to array, each row is a bracket, each column is a specific age in that bracket 
-            y_values = np.reshape(df_y_values.values, (len(df_y_values)//bracket_size, bracket_size)) #nrows, ncols
-            # calculate interpolation error over the bracket as the sum of errors
-            delta_bracket = np.sum(y_values - df_y_mean_bracket.values[:, np.newaxis], axis=1) # sums along row
-            # calculate relative weights as the value divided by the sum of all values in the bracket
-            sum_over_years = np.sum(y_values, axis=1)
-            weights = y_values / sum_over_years[:, np.newaxis]
-            # compute correction for each y value
-            delta_i = weights * delta_bracket[:, np.newaxis]
-            # correct the y values 
-            y_corrected = np.nansum(np.dstack((y_values,-delta_i)),2).reshape(-1)
-            
-        return y_corrected
-    
-    # unpack loaded wcde values
-    wcde_years, wcde_ages, wcde_country_data = cohort_years, cohort_ages, df_cohort_size_filter.values #.iloc[:,2:]
-    
-    # initialise dictionary to store cohort sizes dataframes per country with years as rows and ages as columns
-    d_cohort_size = {}
-    
-    # loop over countries
-    print('interpolating cohort sizes per country')
-    for i,name in enumerate(df_cohort_size_filter.index):
-        # extract population size per age cohort data from WCDE file and linearly interpolate from 5-year WCDE blocks to pre-defined birth year
-        wcde_per_country = np.reshape(wcde_country_data[i,:],((len(wcde_ages),len(wcde_years)))) 
-        # every row is an age cohort (len 21), every column is a year (len 31)
-        # use dataframes to do reindexing and interpolation (see how much slower this makes it cfr. to numpy - could do with numpy interpolate.griddata if you accept that ages 0-2 are not interpolated but held constant - decide what assumption we want to use!) 
-        wcde_per_country_df = pd.DataFrame(
-            wcde_per_country,
-            index=wcde_ages,
-            columns=wcde_years
-        )
-    
-        #set new coordinates after interpolation - check you want this & put in flags at start or something !! 
-        ages_interpn_cohorts =  np.arange(0,105) # ISSUE: understand if OK np.arange(104,-1,-1) #np.arange(100,-1,-1) # new_ages in luke's script (prev: np.arange(0,105))
-        years_interpn_cohorts = np.arange(1950,2100+1)
-    
-        # interpolate per ages
-        wcde_per_country_df = wcde_per_country_df.reindex(ages_interpn_cohorts)
-        wcde_per_country_df
-        wcde_per_country_intrp = wcde_per_country_df.astype('float').interpolate(
-                method='slinear', # original 'linear' filled end values with constants; slinear calls spline linear interp/extrap from scipy interp1d
-                limit_direction='both',
-                fill_value='extrapolate',
-                axis=0
+        # if cohort sizes are from WCDE rename from SSP name to WPP name
+        if data_source_cohorts == 'WCDE':
+            mapping = dict(zip(df_countries['SSP name'], df_countries['name']))
+            da_cohort_size = da_cohort_size.assign_coords(
+                country = [mapping[c] for c in da_cohort_size.country.values]
             )
-        # set negative numbers to zero
-        wcde_per_country_intrp[wcde_per_country_intrp<0]=0
-        # fix the not mean preserving issue
-        wcde_per_country_intrp_correct = wcde_per_country_intrp.copy()
-        for y in wcde_years:
-            wcde_per_country_intrp_correct.loc[:,y] = distribute_error_across_years(
-                wcde_per_country_intrp.loc[:,y], # interpolated values
-                wcde_per_country_df.dropna().loc[:,y], # true mean
-                bracket_size=5) # bracket size 
-         
-        # check for neg numbers
-        if (wcde_per_country_intrp_correct < 0).any().any():
-            print('after interpolation and mean-preserving correction there are some neg numbers in {}, {}, setting them to zero'.format(i,name))
-            # set them to zero
-            wcde_per_country_intrp_correct[wcde_per_country_intrp_correct<0]=0
-            # TODO: modify distribute_error_across_years to not reintroduce negative numbers 
-    
-        # interpolate between years
-        wcde_per_country_df = wcde_per_country_intrp_correct.transpose().reindex(years_interpn_cohorts)
-        wcde_per_country_intrp_years = wcde_per_country_df.astype('float').interpolate(
-                method='slinear', # original 'linear' filled end values with constants; slinear calls spline linear interp/extrap from scipy interp1d
-                limit_direction='both',
-                fill_value='extrapolate',
-                axis=0
-            )
-        d_cohort_size[name] = wcde_per_country_intrp_years / 5
-    
-        #  make a data array with the information from all the countries together
-    da_cohort_size = xr.DataArray(
-        np.asarray([v for k,v in d_cohort_size.items()]), # see whether to include nan countries here -  np.asarray([v for k,v in d_cohort_size.items() if k in df_cohort_size_filter['country'].values])
-        coords={
-            'country': ('country', df_cohort_size_filter.index),
-            'time': ('time', years_interpn_cohorts),
-            'ages': ('ages', ages_interpn_cohorts),
-        },
-        dims=[
-            'country',
-            'time',
-            'ages',
-        ],
-        name='cohort_size'
-)
+
+        # WCDE: in demographic datasets and have world bank region/income info = 195 countries
+                # and shapefile resolved = 180 countries
+                # and frax mask resolved = 192 countries
+        # UNWPP: in demographic datasets and have world bank region/income info = 217 countries
+                # and shapefile resolved = 183 countries
+                # and frax mask resolved = 209 countries
+        
+
+    # pack country information
+    d_countries = {
+        'info_pop': df_countries,
+        'borders': country_borders,     
+        'population_map': da_population,
+        'birth_years': None,
+        'life_expectancy_5': df_life_expectancy_5, 
+        'cohort_size': da_cohort_size,
+        'mask': (countries_regions,countries_mask),                  
+    }
 
 
-    return da_cohort_size
+    return d_countries
 
 
 
@@ -732,7 +1113,9 @@ def interpolate_cohortsize_countries(
 
 
 
-
+# ---------------------------------------------
+# 6. Wrapper function gridscale demographics
+# ---------------------------------------------
 
 
 
@@ -743,14 +1126,14 @@ def get_gridscale_demographics(
     da_cohort_size,
     startyear=2000,
     endyear=2005,
-    chunksize=100
+    #chunksize=100
 ):
     """
     To do: make a wrapper function that runs all previous and does this
     make a function that does this just for one country/region if one only wants a certain country? - doing it ! to clean up nicer later 
     """
 
-    da_pop = da_population.sel(time=slice(startyear, endyear)) #.chunk({'time': chunksize, 'lat': chunksize, 'lon': chunksize})  # check optimal chunking sizes and whether to chunk here or above,myabe here? 
+    da_pop = da_population.sel(time=slice(startyear, endyear))   # TODO: check optimal chunking sizes and whether to chunk here or above,myabe here?  #.chunk({'time': chunksize, 'lat': chunksize, 'lon': chunksize})
     
     # Initialize the combined demographics DataArray
     da_pop_demographics = None
@@ -771,11 +1154,11 @@ def get_gridscale_demographics(
         iso = df_countries_matched[df_countries_matched['country_wcde']==country]['iso3_frac'].values[0]
     
         # if this isocode is in the mask file 
-        if iso in da_countrymasks['variable']: # do this in a slightly more intelligent way??? similar to what i was doing b4 with the dataframs, instead of if
+        if iso in da_countrymasks['variable']: # TODO: do this in a slightly more intelligent way??? similar to what i was doing b4 with the dataframs, instead of if
         
             # Get cohort sizes of the country
             if da_cohort_size.country.values.size > 1:
-                da_smple_cht = da_cohort_size.sel(country=country).sel(time=slice(startyear, endyear)) #.chunk({'time': 10, 'ages': 10})
+                da_smple_cht = da_cohort_size.sel(country=country).sel(time=slice(startyear, endyear)) 
             else:
                 da_smple_cht = da_cohort_size.sel(time=slice(startyear, endyear)) 
 
@@ -792,81 +1175,13 @@ def get_gridscale_demographics(
         
             # Explicitly clear intermediate variables to free up memory
             del iso, da_smple_cht, da_smple_cht_prp, pop_country
+        
         else:
-            print('**iso not in mask')
-            pass
+
+            print(f'**iso {iso} not in mask')
+
     
     da_pop_demographics = da_pop_demographics.compute()
     
     return da_pop_demographics
 
-
-
-
-
-
-def population_demographics_gridscale_global(
-    startyear=2000,
-    endyear=2005,
-    ssp=2,
-    urbanrural=False,
-    chunksize=100
-):
-    """
-    Wrapper function to run previous functions choosing isimip round and ssp, for filepaths see component functions. 
-    """
-
-    class HiddenPrints:
-        def __enter__(self):
-            self._original_stdout = sys.stdout
-            sys.stdout = open(os.devnull, 'w')
-    
-        def __exit__(self, exc_type, exc_val, exc_tb):
-            sys.stdout.close()
-            sys.stdout = self._original_stdout
-
-    
-    with HiddenPrints():
-        df_countries_matched = match_country_names_all_mask_frac();
-
-        df_cohort_sizes, ages, years = load_cohort_sizes(ssp=ssp)
-
-        da_population = load_population(ssp=ssp,
-                                    startyear=startyear,
-                                    endyear=endyear,
-                                   urbanrural=urbanrural)
-
-    print('loading country masks')
-    da_countrymasks = load_countrymasks_fillcoasts() #.chunk({'lat': chunksize, 'lon': chunksize})
-
-    print('interpolating cohort sizes per country')
-    with HiddenPrints():
-        da_cohort_size = interpolate_cohortsize_countries(df_cohort_sizes,
-                                                 ages,
-                                                 years)
-    print('calculating gridscale demographics')
-    with HiddenPrints():
-        da_pop_demographics = get_gridscale_demographics(da_population,
-                                                 da_countrymasks,
-                                                 df_countries_matched,
-                                                 da_cohort_size,
-                                                 startyear=startyear,
-                                                 endyear=endyear);
-
-
-
-    return da_pop_demographics
-
-
-
-def population_demographics_gridscale_selcountries(
-    startyear=2000,
-    endyear=2005,
-    ssp=2,
-    urbanrural=False,
-    countrylist=None
-):
-
-    pass
-
-    return da_pop_demographics
