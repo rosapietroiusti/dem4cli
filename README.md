@@ -8,7 +8,7 @@ Contact: rosa.pietroiusti@vub.be
 
 Updated in 2026 with new available data and additional functionalities, described in Pietroiusti et al. "Increasing lifetime exposure to extreme fire weather under climate change in Europe" (2026, submitted). 
 
-Based on Thiery et al "Intergenerational inequities in exposure to climate extremes" (2021, Science), Grant et al "Unprecedented lifetime exposure" (2025, Science), Vanderkelen et al "Lifetime exposure to water scarcity"(2026, in review), Pietroiusti et al. "Age-specific exposure to human-induced increases in humid heat" (2026, in review), Laridon et al "Lifetime exposure from fossil fuel megaprojects" (2026, in prep). 
+Based on Thiery et al "Intergenerational inequities in exposure to climate extremes" (2021, Science), Grant et al "Unprecedented lifetime exposure" (2025, Nature), Vanderkelen et al "Lifetime exposure to water scarcity"(2026, in review), Pietroiusti et al. "Age-specific exposure to human-induced increases in humid heat" (2026, in review), Laridon et al "Lifetime exposure from fossil fuel megaprojects" (2026, in prep). 
 
 ## Data description
 
