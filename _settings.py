@@ -20,91 +20,159 @@ To integrate
 
 """
 
-import os, sys, re 
+import os
 from ._utils import *
 
 
+class Settings(dict):
+    def __getattr__(self, key):
+        try:
+            return self[key]
+        except KeyError:
+            raise AttributeError(f"'Settings' has no attribute '{key}'")
+
+    __setattr__ = dict.__setitem__
+
+    def __repr__(self):
+        lines = ["Settings("]
+        for k, v in self.items():
+            lines.append(f"  {k}: {v}")
+        lines.append(")")
+        return "\n".join(lines)
 
 
-# put these settings in functions!! as arguments !
 
-flags = {}
+def init_settings(**overrides):
 
-flags['version'] = 2
-                        # v1.0 
-                        # v2.0 : new pop data, new cohortsize data, 
+    # --- DEFAULTS ---
+    cfg = Settings({
+        "version": 2,
+        "pop_resolution": 0.1,
+        "GMT_mapping": "year_to_year",
+        "cohort_sizes_source": "UNWPP2024",
+        "countrymask": "shapefile",
 
+        "GMT_min": 1.5,
+        "GMT_max": 3.5,
+        "GMT_inc": 0.1,
 
-flags['pop_resolution'] = 0.1 # 0.1 or 0.5 for v2, only 0.5 for v1 
+        "scen_thresholds": {
+            "3.0": [2.9, 3.0],
+            "NDC": [2.35, 2.4],
+            "2.0": [1.95, 2.0],
+            "1.5": [1.45, 1.5],
+        },
 
-flags['GMT_mapping'] = 'year_to_year'
-                        # 'year_to_year' = Wim/Luke method
-                        # 'STITCHES' = stitches approach to remapping - TO DEVELOP
-                    
+        "scenarios": [
+            "historical", "ssp126", "ssp245", "ssp370", "ssp585"
+        ],
+    })
 
-flags['cohort_sizes_source'] = 'UNWPP2024'
-                        # 'UNWPP2024'
-                        # 'WCDE' (these are SSPs)
+    # --- APPLY USER OVERRIDES ---
+    cfg.update(overrides)
 
+    script_dir = os.path.abspath(os.path.dirname(__file__))
+    data_dir = os.path.join(script_dir, "data")
 
-flags['countrymask'] = 'shapefile' 
-                        # 'shapefile' 
-                        # 'fractional_mask' (not fully implemented Lexp) - TO DEVELOP
+    cfg.script_dir = script_dir
+    cfg.data_dir = data_dir
 
-script_dir = os.path.abspath( os.path.dirname( __file__ ) )
-data_dir = os.path.join(script_dir, 'data')
+    res = float_to_str(cfg.pop_resolution)
 
+    if cfg.pop_resolution not in [0.1, 0.5]:
+        raise ValueError("pop_resolution must be 0.1 or 0.5")
 
-# Data paths for different versions
+    # --- VERSION-DEPENDENT LOGIC ---
+    if cfg.version == 1:
 
-# pulling filepaths out of functions (mostly) to make it easier to switch between versions
+        cfg.pop_resolution = 0.5
+        cfg.dir_population = os.path.join(data_dir, "gridded-pop")
 
-if flags['version'] == 1: 
+        cfg.cohort_sizes_source = "WCDE"
+        cfg.dir_cohortsizes = os.path.join(data_dir, "cohort-sizes", "WCDE")
 
-    dir_population = os.path.join(data_dir, 'gridded-pop/') 
-    dir_cohortsizes = os.path.join(data_dir, 'cohort-sizes/WCDE')
-    filepath_countrymask = os.path.join(data_dir, 'country-masks/isipedia-countries/preprocessed/countrymasks_fractional_'+float_to_str(flags['pop_resolution'])+'deg_filledcoasts.nc')
-    filepath_lifeexpectancy = os.path.join(data_dir, 'life-expectancy/UN_WPP2024/WPP2024_MORT_F05_1_LIFE_EXPECTANCY_BY_AGE_BOTH_SEXES.xlsx')
-    filepath_lookuptable = os.path.join(data_dir, 'country-masks/lookup_table_dem4cli_v1.xlsx' )
-                                         
+        cfg.countrymask = "fractional_mask"
+        cfg.filepath_countrymask = os.path.join(
+            data_dir,
+            "country-masks/isipedia-countries/preprocessed",
+            f"countrymasks_fractional_{res}deg_filledcoasts.nc"
+        )
 
-elif flags['version'] == 2:
+        cfg.filepath_lookuptable = os.path.join(
+            data_dir, "country-masks/lookup_table_dem4cli_v1.xlsx"
+        )
 
-    dir_population = '/data/brussel/vo/000/bvo00012/data/dataset/COMPASS/v2/population_count/'+float_to_str(flags['pop_resolution'])+'deg' # make a symlink in dem4cli? 
-    if flags['cohort_sizes_source'] == 'UNWPP2024':
-        dir_cohortsizes = os.path.join(data_dir, 'cohort-sizes/UN_WPP2024')
-    elif flags['cohort_sizes_source'] == 'WCDE':
-        dir_cohortsizes = os.path.join(data_dir, 'cohort-sizes/WCDE_v3.2.beta')
+    elif cfg.version == 2:
 
-    if flags['countrymask'] =='shapefile':
-        filepath_countrymask = os.path.join(data_dir, 'country-masks/natural_earth/Cultural_10m/Countries/ne_10m_admin_0_countries.shp') # TODO: copy this here and implement this flag! 
+        cfg.dir_population = (
+            f"/data/brussel/vo/000/bvo00012/data/dataset/COMPASS/v2/"
+            f"population_count/{res}deg"
+        )
+
+        if cfg.cohort_sizes_source == "UNWPP2024":
+            cfg.dir_cohortsizes = os.path.join(
+                data_dir, "cohort-sizes/UN_WPP2024"
+            )
+        elif cfg.cohort_sizes_source == "WCDE":
+            cfg.dir_cohortsizes = os.path.join(
+                data_dir, "cohort-sizes/WCDE_v3.2.beta"
+            )
+        else:
+            raise ValueError("Invalid cohort_sizes_source")
+
+        if cfg.countrymask == "shapefile":
+            cfg.filepath_countrymask = os.path.join(
+                data_dir,
+                "country-masks/natural_earth/Cultural_10m/Countries",
+                "ne_10m_admin_0_countries.shp"
+            )
+        elif cfg.countrymask == "fractional_mask":
+            cfg.filepath_countrymask = os.path.join(
+                data_dir,
+                "country-masks/isipedia-countries/preprocessed",
+                f"countrymasks_fractional_{res}deg_filledcoasts.nc"
+            )
+        else:
+            raise ValueError("Invalid countrymask")
+
+        cfg.filepath_lookuptable = os.path.join(
+            data_dir, "country-masks/lookup_table_dem4cli_v2.csv"
+        )
+
     else:
-        filepath_countrymask = os.path.join(data_dir, 'country-masks/isipedia-countries/preprocessed/countrymasks_fractional_'+float_to_str(flags['pop_resolution'] )+'deg_filledcoasts.nc')
-    filepath_lifeexpectancy = os.path.join(data_dir, 'life-expectancy/UN_WPP2024/WPP2024_MORT_F05_1_LIFE_EXPECTANCY_BY_AGE_BOTH_SEXES.xlsx')
-    filepath_lookuptable_original = '/data/brussel/vo/000/bvo00012/data/dataset/COMPASS/v2/'+'cross_reference_SSP3_2_to_ISO.xlsx'
-    filepath_lookuptable = data_dir+'/country-masks/lookup_table_dem4cli_v2.csv'
+        raise ValueError("version must be 1 or 2")
+
+    # --- COMMON PATHS ---
+    cfg.filepath_lifeexpectancy = os.path.join(
+        data_dir,
+        "life-expectancy/UN_WPP2024",
+        "WPP2024_MORT_F05_1_LIFE_EXPECTANCY_BY_AGE_BOTH_SEXES.xlsx"
+    )
+
+    cfg.filepath_world_bank_meta = os.path.join(
+        data_dir, 
+        'income-groups/world_bank/CLASS.xlsx')
 
 
-filepath_isimip_countries_meta = os.path.join(data_dir, 'country-masks/isipedia-countries/countryData.json')
-filepath_world_bank_meta = os.path.join(data_dir, 'income-groups/world_bank/CLASS.xlsx')
+    cfg.filepath_model_gmst = os.path.join(
+        data_dir, 
+        'gmst-models/gmst_models_1850_2100_allmodels.csv')
 
-
-# settings for GMT mapping / stylized trajectory creation
-dir_temperature_trajectories = os.path.join(data_dir, 'temperature-trajectories') 
-GMT_min=1.5
-GMT_max=3.5
-GMT_inc = 0.1
-scen_thresholds = { # peak warming between these values
-    '3.0': [2.9,3.0],
-    'NDC': [2.35,2.4], # this is not 2.7 it's 2.4 ? Update value? 
-    '2.0': [1.95,2.0],
-    '1.5': [1.45, 1.5],
-}
-scenarios = ['historical', 'ssp126', 'ssp245', 'ssp370', 'ssp585']
+    cfg.dir_temperature_trajectories = os.path.join(data_dir, 
+        'temperature-trajectories') 
 
 
 
-# delete from dem4cli??? 
+
+    return cfg
 
 
-bbox_europe = [ 31.99,  71.09, -14.96,  34.94]
+
+    # TODO 
+    # add cfg.filepath_shp_subnational
+    # add ssp choice here
+
+
+    # modify lifetime exposure, gmt mapping and gridscale to work with the config object
+    # test it ! 
+

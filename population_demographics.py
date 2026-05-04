@@ -33,9 +33,10 @@ from ._settings import *
 
 @timeit
 def load_country_metadata(
-    filepath_world_bank = filepath_world_bank_meta, # what year is this from?
-    filepath_lookuptable=filepath_lookuptable,
-    data_source_cohorts=flags['cohort_sizes_source'],
+    cfg,
+    filepath_world_bank=None,
+    filepath_lookuptable=None,
+    data_source_cohorts=None,
     worldbank_filter=True,
 ):
     """
@@ -52,6 +53,19 @@ def load_country_metadata(
                                 and if world_bank filter is True also based on WB categorization
     
     """
+    if cfg is None:
+        raise ValueError(
+            "cfg must be provided. Create one with cfg = init_settings()."
+        )
+
+    if filepath_world_bank is None:
+        filepath_world_bank = cfg.filepath_world_bank_meta
+
+    if filepath_lookuptable is None:
+        filepath_lookuptable = cfg.filepath_lookuptable
+
+    if data_source_cohorts is None:
+        data_source_cohorts = cfg.cohort_sizes_source
 
     # 1) World Bank data
 
@@ -135,12 +149,14 @@ def load_country_metadata(
 
 
 @timeit
-def load_cohort_sizes( 
-    dir_cohortsizes = dir_cohortsizes,
-    data_source = flags['cohort_sizes_source'], # 
-    ssp = 2,
-    by_sex = False,
+def load_cohort_sizes(
+    cfg,
+    dir_cohortsizes=None,
+    data_source=None,
+    ssp=2,
+    by_sex=False,
 ):
+
     """
     load population size per age cohort from Wittgenstein Center Data Explorer.
     
@@ -174,6 +190,17 @@ def load_cohort_sizes(
     - in v2 its a da not a df !!! TODO: change version 1 so it also gives a da?  
     """
 
+    if cfg is None:
+        raise ValueError(
+            "cfg must be provided. Create one with cfg = init_settings()."
+        )
+
+    if dir_cohortsizes is None:
+        dir_cohortsizes = cfg.dir_cohortsizes
+
+    if data_source is None:
+        data_source = cfg.cohort_sizes_source
+
     def convert_age_range(age):
         if age == '100+':
             return 100
@@ -186,7 +213,7 @@ def load_cohort_sizes(
     
     print(f'loading cohort sizes from {data_source}')
 
-    if flags['version'] == 1:
+    if cfg.version == 1:
 
         if not data_source == 'WCDE':
             print(f'error method cohort size undefined in v1 for {data_source}')
@@ -227,7 +254,7 @@ def load_cohort_sizes(
                 pass
                 # to develop by sex 
 
-    elif flags['version'] == 2:
+    elif cfg.version == 2:
 
         if data_source == 'WCDE': # cohort sizes from SSP projections v3.2-beta
 
@@ -320,10 +347,11 @@ def load_cohort_sizes(
 
 @timeit
 def interpolate_cohortsize_countries(
+    cfg,
     df_cohort_sizes,
     cohort_ages,
     cohort_years,
-    data_source = flags['cohort_sizes_source'],
+    data_source = None,
     extend_method = 'linear',  # linear extends with constant value, slinear does spline linear extraplation
     startyear= 1950,
     endyear = None, # should be last birthyear of interest (2025) + max life expectancy 
@@ -331,6 +359,9 @@ def interpolate_cohortsize_countries(
     """
     Interpolate cohortsizes from 5 year age brackets to year to year - only necessary for SSP data 
     """
+
+    if data_source is None:
+        data_source = cfg.cohort_sizes_source
 
     #set new coordinates for after interpolation - check you want this & put in flags at start or something !! 
     ages_interpn_cohorts =  np.arange(0,105) 
@@ -362,14 +393,21 @@ def interpolate_cohortsize_countries(
                 
             return y_corrected
 
-        if flags['version'] == 1 : 
-            wcde_years, wcde_ages, wcde_country_data = cohort_years, cohort_ages, df_cohort_size_filter.values 
+        if cfg.version == 1:
+            wcde_years, wcde_ages, wcde_country_data = (
+                cohort_years,
+                cohort_ages,
+                df_cohort_size_filter.values,
+            )
             countries = df_cohort_size_filter.index
 
-        elif flags['version'] == 2 : 
-            wcde_years, wcde_ages = cohort_years, cohort_ages # can get this from data itself - don't need to be arguments
-            countries = df_cohort_size_filter.country.values # its not a df its a da in v2! 
-        
+        elif cfg.version == 2:
+            wcde_years, wcde_ages = cohort_years, cohort_ages
+            countries = df_cohort_size_filter.country.values
+
+        else:
+            raise ValueError("cfg.version must be 1 or 2")
+
         # initialise dictionary to store cohort sizes dataframes per country with years as rows and ages as columns
         d_cohort_size = {}
         
@@ -378,14 +416,14 @@ def interpolate_cohortsize_countries(
         for i,name in enumerate(countries):
             # extract population size per age cohort data from WCDE file and linearly interpolate from 5-year WCDE blocks to pre-defined birth year
             
-            if flags['version'] == 1 : 
+            if cfg.version == 1 : 
                 wcde_per_country = np.reshape(wcde_country_data[i,:],((len(wcde_ages),len(wcde_years)))) 
                 wcde_per_country_df = pd.DataFrame(
                     wcde_per_country,
                     index=wcde_ages,
                     columns=wcde_years
                 )
-            elif flags['version'] == 2 : 
+            elif cfg.version == 2 : 
                 wcde_per_country_df = df_cohort_size_filter.sel(country=name).to_pandas().T
                 # every row is an age group (len 21), every column is a year (len 31)
 
@@ -464,7 +502,8 @@ def interpolate_cohortsize_countries(
 
 @timeit
 def load_population(
-    dir_population= dir_population, 
+    cfg,
+    dir_population=None,
     startyear=1950,
     endyear=2100,
     ssp=2,
@@ -494,6 +533,9 @@ def load_population(
         da_population: (DataArray)  gridded population density. 
 
     """
+    if dir_population is None:
+        dir_population = cfg.dir_population
+
     # Auxiliary function to slice each dataset to a particular region and time 
     def cut_to_region_time(da):
         # time slice
@@ -520,7 +562,7 @@ def load_population(
     # Initialize list to store datasets
     datasets = []
 
-    if flags['version'] == 1: 
+    if cfg.version == 1: 
 
         if urbanrural:
             VARs=['urban-population','rural-population','total-population']
@@ -566,7 +608,7 @@ def load_population(
             datasets.append(da_pop_sspsoc)
 
 
-    elif flags['version'] == 2: 
+    elif cfg.version == 2: 
 
         VARs='Population_count'
         startyear_ssp = 2025 
@@ -616,8 +658,9 @@ def load_population(
 
 @timeit
 def load_countrymask(
-    filepath_countrymask=filepath_countrymask,
-    data_source_countrymask=flags['countrymask'],
+    cfg,
+    filepath_countrymask=None,
+    data_source_countrymask=None,
     df_metadata=None,       
     da_population=None,
     fillcoast=False, # True if you want to preprocess and fill coastal pixels to not lose coastal pops (done already in preprocessed files)
@@ -645,6 +688,11 @@ def load_countrymask(
 
 
     """
+
+    if filepath_countrymask is None:
+        filepath_countrymask = cfg.filepath_countrymask 
+    if data_source_countrymask is None:
+        data_source_countrymask = cfg.countrymask
 
     #TODO: divide into two different functions? for frax versus shapefile? 
 
@@ -784,6 +832,7 @@ def load_countrymask(
 
 @timeit
 def load_subnational_mask(
+    cfg,
     filepath_shp=None,
     da_population=None,
     bbox=None,
@@ -806,6 +855,9 @@ def load_subnational_mask(
     Returns:
 
     """
+
+    if filepath_shp is None:
+        filepath_shp = cfg.filepath_shp_subnational
 
     def make_shp(filepath_shp, dict_keep=None, dict_drop=None):
         shp = gpd.read_file(filepath_shp)
@@ -886,7 +938,8 @@ def load_subnational_mask(
 
 @timeit
 def load_unwpp_lifeexpectancy(
-        filepath_lifeexpectancy = filepath_lifeexpectancy,
+    cfg,
+        filepath_lifeexpectancy = None,
         start_birthyear=1950,
         end_birthyear=2025
 ):
@@ -902,6 +955,10 @@ def load_unwpp_lifeexpectancy(
     https://population.un.org/wpp/downloads?folder=Standard%20Projections&group=Mortality
     
     """
+
+    if filepath_lifeexpectancy is None:
+        filepath_lifeexpectancy = cfg.filepath_lifeexpectancy
+
     df_list = []
 
     for sheet in [0,1]: # sheet 0 has reconstructions up to 2023, sheet 2 has projections
@@ -986,42 +1043,38 @@ def get_life_expectancies(df_unwpp,
 
 @timeit
 def preprocess_all_country_data(
-
-    filepath_lifeexpectancy = filepath_lifeexpectancy, # life expectancy data
+    cfg,
     start_birthyear=1950,
-    end_birthyear=2025,                 # endyear is taken from end_birthyear + max life expectancy
-
-    dir_cohortsizes = dir_cohortsizes,  # cohort size data
+    end_birthyear=2025,
     ssp=2,
-    data_source_cohorts=flags['cohort_sizes_source'],
-    extend_method='linear',             # note, slinear not implemented for UNWPP2024
-    by_sex=False,                       # NOTE by_sex not implemented
-                                            
-    dir_population= dir_population,     # gridded pop data 
-    urbanrural=False,                   # NOTE urbanrural not implemented for v2
-    bbox = None,
-
-    filepath_countrymask = filepath_countrymask,    # country masks 
-    data_source_countrymask = flags['countrymask'],
-    fillcoast=False,                    # NOTE preprocessing is already done in standard input files - TODO: add option to select shapefile or country mask
+    extend_method="linear",
+    by_sex=False,
+    urbanrural=False,
+    bbox=None,
+    fillcoast=False,
     fix_smallislands=False,
-    
-    filepath_world_bank = filepath_world_bank_meta, # metadata 
-    filepath_lookuptable = filepath_lookuptable,    # country filtering
     filter_countries=True,
-    worldbank_filter=True, 
-
-    ):
+    worldbank_filter=True,
+):
+    filepath_lifeexpectancy = cfg.filepath_lifeexpectancy
+    dir_cohortsizes = cfg.dir_cohortsizes
+    data_source_cohorts = cfg.cohort_sizes_source
+    dir_population = cfg.dir_population
+    filepath_countrymask = cfg.filepath_countrymask
+    data_source_countrymask = cfg.countrymask
+    filepath_world_bank = cfg.filepath_world_bank_meta
+    filepath_lookuptable = cfg.filepath_lookuptable
 
     # metadata from worldbank, unwpp and availability of cohort data - filters already countries 
-    df_metadata =  load_country_metadata(filepath_world_bank = filepath_world_bank,
+    df_metadata =  load_country_metadata(cfg,
+                                        filepath_world_bank = filepath_world_bank,
                                         filepath_lookuptable=filepath_lookuptable,
                                         data_source_cohorts = data_source_cohorts,
                                         worldbank_filter=worldbank_filter) 
 
 
     # load life expectancy data and clean 
-    df_unwpp = load_unwpp_lifeexpectancy(filepath_lifeexpectancy = filepath_lifeexpectancy) 
+    df_unwpp = load_unwpp_lifeexpectancy(cfg, filepath_lifeexpectancy = filepath_lifeexpectancy) 
     # go from 'period' to 'cohort' life expectancy
     df_life_expectancy_5 = get_life_expectancies(df_unwpp,
                                             start_birthyear=start_birthyear,
@@ -1034,10 +1087,11 @@ def preprocess_all_country_data(
 
 
     # loads raw cohort size from WCDE ssps or UNWPP2024 (reconstruction + projections) and cleans to keep only relevant information
-    df_cohort_sizes, ages, years = load_cohort_sizes(dir_cohortsizes, data_source=data_source_cohorts, ssp=ssp, by_sex=by_sex)
+    df_cohort_sizes, ages, years = load_cohort_sizes(cfg, dir_cohortsizes, data_source=data_source_cohorts, ssp=ssp, by_sex=by_sex)
     # for WCDE, interpolates cohort sizes from 5 year to single year and corrects to preserve mean and extends past 2100
     # for UNWPP extends past 2100 only
     da_cohort_size = interpolate_cohortsize_countries(
+                        cfg,
                         df_cohort_sizes,
                         ages,
                         years,
@@ -1050,6 +1104,7 @@ def preprocess_all_country_data(
 
     # load gridded population data, optional cropping in space and time
     da_population = load_population(
+                        cfg,
                         dir_population= dir_population, 
                         startyear=start_birthyear,
                         endyear=endyear,  
@@ -1060,6 +1115,7 @@ def preprocess_all_country_data(
 
     # open countrymasks, optional preprocessing (already done in default input files)
     country_borders, countries_regions, countries_mask, df_countries = load_countrymask(
+                                        cfg,
                                         filepath_countrymask,
                                         data_source_countrymask = data_source_countrymask,
                                         df_metadata=df_metadata,

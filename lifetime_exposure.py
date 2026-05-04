@@ -19,6 +19,8 @@ from ._settings import *
 
 script_dir = os.path.abspath( os.path.dirname( __file__ ) )
 
+
+
 #%%
 
 
@@ -70,15 +72,15 @@ def calc_gmt_anomaly_correction(
 
     return anomaly_correction
 
-
 @timeit
 def load_climate_data(
+    cfg,
     extremes,                   # e.g. "FWI95d"
     model_names,                # GCMs
     df_GMT_strj,                # stylized trajectories
     GMT_extra_trajectories = None,
     GMT_extra_trajectories_names = None,
-    filepath_model_gmst = os.path.join(data_dir, 'gmst-models/gmst_models_1850_2100_fwi.csv'),
+    filepath_model_gmst = None, #os.path.join(data_dir, 'gmst-models/gmst_models_1850_2100_fwi.csv') ,
     scenarios = None,
     rolling_window=21,
     min_periods=11,
@@ -124,6 +126,9 @@ def load_climate_data(
 
 
     """
+
+    if filepath_model_gmst is None:
+        filepath_model_gmst = cfg.filepath_model_gmst
 
     print('Processing climate data')
 

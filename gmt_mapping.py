@@ -23,8 +23,9 @@ from ._settings import *
 #%%
 
 def ar6_scen_grab(
-    scens,
-    df_GMT_all,
+    cfg,
+    scens=None,
+    df_GMT_all=None,
 ):
     """
     Filter represtative AR6 scenarios from whole AR6 scenario database. 
@@ -47,7 +48,8 @@ def ar6_scen_grab(
         - 1.5 refers to peak temperature, it is actually a 1.3 degree scenario in 2100
                                                                                     
     """
-    
+    if scens is None:
+        scens = cfg.scens
     # start with upper line toward 4 degrees
     # convert to bools based on row max to find column with most maxes via idxmax
     maxes = pd.concat(
@@ -154,14 +156,15 @@ def ar6_scen_grab(
 
 @timeit
 def load_GMT(
+    cfg,
     year_start,
     year_end,
     gmt_extend_method='10yrtrend',
     smooth_first_decades=True,
     source_historical='AR6',
-    GMT_min_strj = GMT_min, # defined in settings 
-    GMT_max_strj = GMT_max,
-    GMT_inc = GMT_inc,
+    GMT_min_strj = None, # defined in settings 
+    GMT_max_strj = None,
+    GMT_inc = None,
 ):
 
     """
@@ -189,6 +192,14 @@ def load_GMT(
         - original df_GMT_SR15 used only to get historical 1960-1999
         - can still clean this up a bit
     """
+
+    if GMT_min_strj is None:
+        GMT_min_strj = cfg.GMT_min
+    if GMT_max_strj is None:
+        GMT_max_strj = cfg.GMT_max 
+    
+    GMT_inc = cfg.GMT_inc
+    dir_temperature_trajectories = cfg.dir_temperature_trajectories
 
     def extend_gmt_to_year_range(df, year_start=year_start, year_end=year_end, gmt_extend_method=gmt_extend_method):
         """
@@ -391,6 +402,7 @@ def load_GMT(
     # take only years you effectively want
     df_GMT_ar6 = df_GMT_ar6.loc[year_start:]
 
+    scen_thresholds = cfg.scen_thresholds
 
     # get new trajectories 
     df_GMT_lb, df_GMT_15, df_GMT_20, df_GMT_NDC, df_GMT_30, df_GMT_40 = ar6_scen_grab(
@@ -487,7 +499,8 @@ def load_GMT(
 
 #%%
 
-def calc_model_gmst(experiments=scenarios,
+def calc_model_gmst(cfg,
+                    experiments=None,
                     GCMs=None,
                     first_ens_member=True,
                     startyear=1850,
@@ -504,6 +517,8 @@ def calc_model_gmst(experiments=scenarios,
     import fsspec
     import intake_esm.cat
     from collections import defaultdict
+
+    experiments = cfg.scenarios
 
     # Monkeypatch the method to use applymap()
     def _columns_with_iterables(self):
