@@ -29,7 +29,7 @@ _dem4cli_ uses demographic data and user-provided climate hazard data to estimat
 
 Data necessary to run dem4cli-v1 is available in a zenodo repository: https://zenodo.org/records/15425666. 
 
-To run dem4cli, you can include the 'data' folder in the same folder as the 'population_demographics.py' script
+To run dem4cli, you can include the 'data' folder in the same folder as the scripts, e.g. the 'population_demographics.py' script
 
 ```
 <SCRIPT_DIR>/data/
