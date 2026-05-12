@@ -8,6 +8,33 @@ Contact: rosa.pietroiusti@vub.be
 
 Updated in 2025 with new available data and additional functionalities, described in Pietroiusti et al. (2026, in prep). Based on Thiery et al (2021), Grant et al (2025), Vanderkelen et al (2026, in review), Pietroiusti et al. (2026, in review), Laridon et al (2026, in prep). 
 
+## Install dem4cli 
+
+A development install can be done after cloning the repo, in pip-editable -e mode (that way code edits will propagate without the need for re-installing):
+
+```
+git clone https://github.com/rosapietroiusti/dem4cli.git
+cd dem4cli
+pip install -e .
+```
+
+This will clone the main branch. To clone a specific branch (e.g. coupling_rime-x_dev): 
+
+```
+git clone -b coupling_rime-x_dev --single-branch https://github.com/rosapietroiusti/dem4cli.git
+cd dem4cli
+pip install -e .
+```
+
+Alternatively (recommended) you can create a conda environment after you have cloned the repository and install dependencies there. 
+
+```
+conda create -n dem4cli-env python=3.10
+conda activate dem4cli-env
+cd dem4cli
+pip install -e .
+```
+
 ## Data description
 
 1. **Life expectancy data** from UNWPP2024 expressed as years left to live at the age of 5 (ex): https://population.un.org/wpp/downloads?folder=Standard%20Projections&group=Mortality. 

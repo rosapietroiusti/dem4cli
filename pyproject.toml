@@ -4,6 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dem4cli"
+version = "0.1.0"
 description = "Demography-climate lifetime exposure tools"
 authors = [
   {name = "Rosa Pietroiusti", email = "rosa.pietroiusti@vub.be"},
