@@ -20,3 +20,7 @@ dependencies = [
   "regionmask",
   "shapely",
 ]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dem4cli"]
