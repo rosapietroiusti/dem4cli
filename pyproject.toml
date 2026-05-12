@@ -19,7 +19,8 @@ dependencies = [
   "geopandas",
   "regionmask",
   "shapely",
-  "statsmodels"
+  "statsmodels",
+  "openpyxl"
 ]
 
 [tool.setuptools.packages.find]
