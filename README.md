@@ -1,16 +1,13 @@
 # Demographics4Climate
 
-dem4cli is a stand-alone module to preprocess demographic data (life expectancy, population size, cohort size data) and compute lifetime exposure over stylized trajectories, based on an annual climate hazard dataset that the user can flexibly provide.
+dem4cli is a stand-alone module to preprocess demographic data (life expectancy, population size, cohort size data) and compute age-specific exposure, or lifetime exposure over stylized trajectories on user-defined climate hazard datasets.
 
 Contact: rosa.pietroiusti@vub.be
 
-## References
-
-Updated in 2025 with new available data and additional functionalities, described in Pietroiusti et al. (2026, in prep). Based on Thiery et al (2021), Grant et al (2025), Vanderkelen et al (2026, in review), Pietroiusti et al. (2026, in review), Laridon et al (2026, in prep). 
 
 ## Install dem4cli 
 
-A development install can be done after cloning the repo, in pip-editable -e mode (that way code edits will propagate without the need for re-installing):
+A development install of package and dependencies can be done after cloning the repo, in pip-editable -e mode (that way code edits will propagate without the need for re-installing)
 
 ```
 git clone https://github.com/rosapietroiusti/dem4cli.git
@@ -34,35 +31,59 @@ conda activate dem4cli-env
 cd dem4cli
 pip install -e .
 ```
+## Run dem4cli
 
-## Data description
+You can import all functions or only some functions of the package, e.g.:
 
-1. **Life expectancy data** from UNWPP2024 expressed as years left to live at the age of 5 (ex): https://population.un.org/wpp/downloads?folder=Standard%20Projections&group=Mortality. 
-2. **Gridded population data** reconstructions and projections. *dem4cli* uses data from the COMPASS project (received from Dominik Paprotny, [documentation here](https://compass-climate.eu/Public%20Deliverables/D3.1_Exposure%20datasets%20at%20multiple%20scales.pdf)), for the period 1950-2100, reconstructions until 2025 and projections thereafter, harmonized with SSP version 3.2-beta national totals for projections. Available at 0.1 or 0.5 degrees for SSP1, SSP2 and SSP3 as ancillary package data. *[TODO: make this available somewhere]*
+```
+from dem4cli import *
+```
+
+To import only functions to preprocess life expectancies (e.g. if running coupled with another emulator):
+
+```
+from dem4cli.population_demographics import load_unwpp_lifeexpectancy, get_life_expectancies
+```
+
+
+## Input data description
+
+1. **Life expectancy data** from UNWPP2024: https://population.un.org/wpp/downloads?folder=Standard%20Projections&group=Mortality. 
+2. **Gridded population data** reconstructions and projections. *dem4cli* uses data from the COMPASS project (received from Dominik Paprotny, [documentation here](https://compass-climate.eu/Public%20Deliverables/D3.1_Exposure%20datasets%20at%20multiple%20scales.pdf)), for the period 1950-2100, reconstructions until 2025 and projections thereafter, harmonized with SSP version 3.2-beta national totals for projections. Available at 0.1 or 0.5 degrees for SSP1, SSP2 and SSP3 as ancillary package data. 
 3. **Cohort sizes** reconstructions and projections at country level from 1950 to 2100. 
     1) Option 1: UNWPP2024 cohort size reconstructions until 2023 and projections thereafter at single year and single age intervals. The mediuim variant best estimate is used in *dem4cli*, this is roughly similar to SSP2 fertility projections. 
     2) Option 2: Wittgenstein Center, SSPs drivers version 3.2-beta (May 2025 release, not publicly distributed yet, request for data access). Data is available as reconstructions up to 2025 and projections thereafter, expressed for 5-year age cohorts at 5-year time snapshots. *dem4cli* supports using this data for SSP1, SSP2 or SSP3.
 4. **Country masks** 
-    1) Country shapefiles: from xx.
-    2) Subnational shapefiles: ancillary package data contains shapefiles at NUTS2 and NUTS3 level, for Europe, from xx. 
-    3) Fractional gridded country masks: from ISIpedia, (Perrette 2023, https://github.com/ISI-MIP/isipedia-countries). Not supported in *dem4cli v2*.  
+    1) Country shapefiles: from naturalearth.
+    2) Subnational shapefiles: ancillary package data contains shapefiles at NUTS2 and NUTS3 level, for Europe, from Eurostat. 
+    3) Fractional gridded country masks: from ISIpedia, (Perrette 2023, https://github.com/ISI-MIP/isipedia-countries). 
 5. **Metadata on income levels and world regions** from the World Bank 2023: https://datatopics.worldbank.org/world-development-indicators/the-world-by-income-and-region.html. 
 
 ### Data availability 
 
-Data necessary to run dem4cli-v1 is available in a zenodo repository: https://zenodo.org/records/15425666 (access by request). 
+All data necessary to run dem4cli is available in a zenodo repository: https://zenodo.org/records/15425666 (access by request). 
 
-To run dem4cli, you can include the 'data' folder in the same folder as the 'population_demographics.py' script
+To run dem4cli, you can include the 'data' folder in the same folder containing the 'pyproject.toml' file:
 
 ```
-<SCRIPT_DIR>/data/
+dem4cli/data/
 ```
 
-> [!WARNING]
-> Work in progress: Preparing data to run dem4cli-v2 is in progress. 
+Data should have the following folder structure: 
 
+```
+├── data/                     
+│   ├── cohort-sizes/
+│   ├── country-masks/
+│   ├── gmst-models/
+│   ├── gmst-obs/
+│   ├── gridded-pop/
+│   ├── income-groups/
+│   ├── life-expectancy/
+│   └── temperature-trajectories/
+```
 
-## What this module does 
+## Settings
 
 You can set your settings in _settings.py
 
@@ -79,11 +100,6 @@ flags['pop_resolution'] = 0.5       # 0.1 or 0.5 degrees (regular grid) for v2, 
 
 ```
 
-> [!WARNING]
-> make this an init function so users dont have to go into _settings.py ! 
-
-> [!WARNING]
-> Clean up the v2/v1 situation
 
 ### Part 1: Demographic data preprocessing 
 
@@ -135,21 +151,18 @@ da_cohort_size = d_countries['cohort_size']
 ```
 
 
- ### Part 2: Land fraction exposed & Lifetime exposure
+ ### Part 2: Land fraction exposed & Lifetime exposure - emulated pathways
  
-> [!WARNING]
-> Work in progress
-
 Users can flexibly load preprocessed annual gridded climate hazard data. This data can be binary (yes/no hazard occurrence during the year) or can represent the number of exceedances of a threshold per year. 
 
 The location of this data should be in [XX LOCATION], with the folder structure matching [XX FOLDER STRUCTURE]
 
-*dem4cli* can be used to 
+*dem4cli* can be used to compute 
 
 
 
 
-### Part 3: Gridscale Demographics (only tested for dem4cli-v1)
+### Part 3: Gridscale Demographics
 
 Using the fractional country masks the proportion of cohort size in each country each year is applied to the gridded population of that country, assuming the cohort proportions are constant across the country. The population totals from the gridded population data are thus conserved (with ~0.03-0.05% of population lost due to mismatch between the countries covered by WCDE and those available in fractional country masks). 
 
@@ -166,5 +179,9 @@ da_pop_demographics_ssp3 = population_demographics_gridscale_global(startyear=20
                                                                     urbanrural=False) 
 ```
 
-> [!WARNING]
-> Development for v2 is work in progress
+
+## References
+
+*Dem4cli* is described in Pietroiusti et al. (2026, in review, preprint: https://eartharxiv.org/repository/view/12831/).
+
+*Dem4cli* is based on Thiery et al (2021 https://www.science.org/doi/10.1126/science.abi7339), Grant et al (2025 https://www.nature.com/articles/s41586-025-08907-1), Vanderkelen et al (2026, in review), Pietroiusti et al. (2026, in review), Laridon et al (2026, in prep). 
