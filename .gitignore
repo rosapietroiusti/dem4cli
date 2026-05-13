@@ -1,0 +1,18 @@
+#ignore data and folders
+
+data/
+figs/
+ignore/
+dem4cli.egg-info/
+
+
+# ignore wildcards
+*.ipynb_checkpoints*
+*pycache*
+*ignore.ipynb
+
+# ignore files 
+*.nc
+*.out
+*.sh
+*.pkl
