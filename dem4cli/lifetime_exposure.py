@@ -28,19 +28,31 @@ def calc_lifetime_exposure_rimex(ds_ts_quantiles, df_life_expectancy,
     # dims: quantile, year
     # data_vars: tuples like ('HI-caution-QDM-v1', 'NGFS CurPol') or just ('HI-caution-QDM-v1')
 
-    # 2. Determine maximum death year and maximum year currently in the dataset
-    death_years = []
-    for birth_yr in range(start_birthyear, end_birthyear + 1):
-        life_expectancy = df_life_expectancy.loc[birth_yr, country]
-        death_yr = birth_yr + life_expectancy
-        death_years.append(death_yr)
-    max_death_yr = int(np.floor(max(death_years)))
-    current_max_year = ds_ts_quantiles['year'].max().values
+    # Determine maximum death year and maximum year currently in the dataset
+    birth_years_check = np.arange(start_birthyear, end_birthyear + 1)
 
+    life_exp_check = df_life_expectancy.loc[birth_years_check, country]
+    death_years = birth_years_check + life_exp_check.values
 
-    # 3. max death year > max year give a warning
+    max_death_yr = int(np.floor(death_years.max()))
+    current_max_year = int(ds_ts_quantiles["year"].max().values)
+
+    # Stop if lifetime extends beyond available quantile data
     if max_death_yr > current_max_year:
-        print(f'Note: max death year ({max_death_yr}) > max year in RIME-x quantiles ({current_max_year})')
+
+        valid = (
+            df_life_expectancy.index
+            + df_life_expectancy[country]
+            <= current_max_year
+        )
+
+        max_possible_birthyear = df_life_expectancy.index[valid].max()
+
+        raise ValueError(
+            f"max death year ({max_death_yr}) exceeds max year in "
+            f"RIME-X quantiles ({current_max_year}); "
+            f"maximum possible birth year is {max_possible_birthyear}"
+        )
 
     birth_years = np.arange(start_birthyear, end_birthyear + 1)
 
@@ -81,6 +93,7 @@ def calc_lifetime_exposure_rimex(ds_ts_quantiles, df_life_expectancy,
     ds_lifetime_exp = exposure_fullyrs + exposure_lastyr
 
     return ds_lifetime_exp
+
 
 
 # not sure this is needed 
