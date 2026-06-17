@@ -792,6 +792,7 @@ def load_subnational_mask(
     col_name="NAME_LATN",
     col_id= "NUTS_ID",
     col_country='CNTR_CODE',
+    population_years=2025
     ):
     """
     Load subnational shapefile mask 
@@ -865,11 +866,22 @@ def load_subnational_mask(
             ).set_index('id', drop=False).rename_axis(None)
 
     # calc population in 2025 from gridded data, to check if some regions are unresolved at the resolution
-    gdf['population'] = np.nan
-    for idx in gdf['id']:
-        gdf.loc[idx,'population'] = da_population.sel(time=2025
-        ).where(subnational_mask==subnational_regions.map_keys(idx), drop=True
-        ).sum().values
+    if population_years:
+        if isinstance(population_years, int):
+            population_years = [population_years]
+        if len(population_years) == 1:
+            gdf['population'] = np.nan
+            for idx in gdf['id']:
+                gdf.loc[idx,'population'] = da_population.sel(time=population_years
+                ).where(subnational_mask==subnational_regions.map_keys(idx), drop=True
+                ).sum().values
+        elif len(population_years) > 1:
+            for year in population_years:
+                gdf[f'population_{year}'] = np.nan
+                for idx in gdf['id']:
+                    gdf.loc[idx,f'population_{year}'] = da_population.sel(time=year
+                    ).where(subnational_mask==subnational_regions.map_keys(idx), drop=True
+                    ).sum().values
 
     # possible to add automatic dropping of empty regions
 
