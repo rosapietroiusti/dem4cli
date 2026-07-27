@@ -35,7 +35,7 @@ flags['version'] = 2
                         # v2.0 : new pop data, new cohortsize data, 
 
 
-flags['pop_resolution'] = 0.1 # 0.1 or 0.5 for v2, only 0.5 for v1 
+flags['pop_resolution'] = 0.5 # 0.1 or 0.5 for v2, only 0.5 for v1 
 
 flags['GMT_mapping'] = 'year_to_year'
                         # 'year_to_year' = Wim/Luke method
@@ -47,7 +47,7 @@ flags['cohort_sizes_source'] = 'UNWPP2024'
                         # 'WCDE' (these are SSPs)
 
 
-flags['countrymask'] = 'shapefile' 
+flags['countrymask'] = 'fractional_mask' 
                         # 'shapefile' 
                         # 'fractional_mask' (not fully implemented Lexp) - TO DEVELOP
 

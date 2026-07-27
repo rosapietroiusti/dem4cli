@@ -616,11 +616,10 @@ def load_population(
 
 @timeit
 def load_countrymask(
+    df_metadata,       
     filepath_countrymask=filepath_countrymask,
-    data_source_countrymask=flags['countrymask'],
-    df_metadata=None,       
+    data_source_countrymask='shapefile', # make this automated from flags
     da_population=None,
-    fillcoast=False, # True if you want to preprocess and fill coastal pixels to not lose coastal pops (done already in preprocessed files)
     fix_smallislands=False, # done in preprocessed input files for 0.5, not for 0.1 - TODO: check if necessary at 0.1 or not ! 
     bbox=None,
     filter_countries=True,
@@ -630,9 +629,9 @@ def load_countrymask(
     for fractional mask there is option to fill coastal pixels so sum of fraction = 1 so coastal populations are not lost. 
 
     Inputs:
+        df_metadata (df):                   df with metadata, output from load_country_metadata function 
         filepath_countrymask (str)
         data_source_countrymask (str):      'fractional_mask' or 'shapefile'
-        df_metadata (df):                   df with metadata, output from load_metadata function 
         da_population (da):                 only necessary for 'shapefile', the population dataarray to make masks
         fillcoast, fix_smallislands (bool): only for 'fractional_mask' whether to fix coastal pixels so fractions sum to one and fix small island states with errors (only coded for 0.5 deg)
         bbox (opt, array):                  miny, maxy, minx, maxx - bbox to crop the masks to 
@@ -664,44 +663,44 @@ def load_countrymask(
 
     if data_source_countrymask == 'fractional_mask':
 
-        if not fillcoast:
-            # Open data - already preprocessed
-            da_countrymasks = xr.open_dataarray(filepath_countrymask, chunks='auto')
-            if "variable" in da_countrymasks.dims:
-                da_countrymasks = da_countrymasks.isel(variable=0)
+        #if not fillcoast:
+        # Open data - already preprocessed
+        da_countrymasks = xr.open_dataarray(filepath_countrymask, chunks='auto')
+        if "variable" in da_countrymasks.dims:
+            da_countrymasks = da_countrymasks.isel(variable=0)
 
-        # NOTE: could delete this whole section since the data is already preprocessed 
-        if fillcoast:
-            # Open data 
-            ds=xr.open_dataset(filepath_countrymask, chunks='auto')
-            da_countrymasks = ds.to_array()
+        # # NOTE: could delete this whole section since the data is already preprocessed 
+        # if fillcoast:
+        #     # Open data 
+        #     ds=xr.open_dataset(filepath_countrymask, chunks='auto')
+        #     da_countrymasks = ds.to_array()
 
-            # clean variable names 
-            strings = da_countrymasks['variable'].values
-            cleaned_strings = [s[2:] if s.startswith('m_') else s for s in strings]
-            da_countrymasks['variable'] = cleaned_strings
-            # last variable is 'world', lose it 
-            da_countrymasks = da_countrymasks.isel(variable=slice(0,225))
+        #     # clean variable names 
+        #     strings = da_countrymasks['variable'].values
+        #     cleaned_strings = [s[2:] if s.startswith('m_') else s for s in strings]
+        #     da_countrymasks['variable'] = cleaned_strings
+        #     # last variable is 'world', lose it 
+        #     da_countrymasks = da_countrymasks.isel(variable=slice(0,225))
 
-            # fill coastal pixels 
-            # sum over all countries 
-            countrymask_sum = da_countrymasks.sum(dim='variable')
-            # correct for coastal pixels where sum of fraction is less than 1, weighted multiplication for sum to equal one
-            da_countrymasks_correct = xr.where(countrymask_sum < 1, da_countrymasks * (1 / countrymask_sum ), da_countrymasks)
-            # small area sum = 2, correct for it 
-            da_countrymasks_corr = xr.where(da_countrymasks_correct.sum(dim='variable') > 1, da_countrymasks_correct/da_countrymasks_correct.sum(dim='variable'), da_countrymasks_correct)
-            da_countrymasks = da_countrymasks_corr
+        #     # fill coastal pixels 
+        #     # sum over all countries 
+        #     countrymask_sum = da_countrymasks.sum(dim='variable')
+        #     # correct for coastal pixels where sum of fraction is less than 1, weighted multiplication for sum to equal one
+        #     da_countrymasks_correct = xr.where(countrymask_sum < 1, da_countrymasks * (1 / countrymask_sum ), da_countrymasks)
+        #     # small area sum = 2, correct for it 
+        #     da_countrymasks_corr = xr.where(da_countrymasks_correct.sum(dim='variable') > 1, da_countrymasks_correct/da_countrymasks_correct.sum(dim='variable'), da_countrymasks_correct)
+        #     da_countrymasks = da_countrymasks_corr
 
-            if fix_smallislands:  
-                # TODO change the lat indexing to be with coords!! doesnt work for 0.1 - hard coded for 0.5 deg 
-                # Fix issue in Singapore pixel, assign fraction from IOSID to SGP 
-                da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='SGP')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')].values
-                da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')] = 0
-                # Fix it also in Mauritius 
-                da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='MUS')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')].values
-                da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')] = 0
+        #     if fix_smallislands:  
+        #         # TODO change the lat indexing to be with coords!! doesnt work for 0.1 - hard coded for 0.5 deg 
+        #         # Fix issue in Singapore pixel, assign fraction from IOSID to SGP 
+        #         da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='SGP')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')].values
+        #         da_countrymasks.loc[dict(lat=da_countrymasks.lat[177], lon=da_countrymasks.lon[567], variable='IOSID')] = 0
+        #         # Fix it also in Mauritius 
+        #         da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='MUS')] += da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')].values
+        #         da_countrymasks.loc[dict(lat=da_countrymasks.lat[220], lon=da_countrymasks.lon[474], variable='IOSID')] = 0
             
-            da_countrymasks = da_countrymasks.rename({'variable':'country'})
+        #da_countrymasks = da_countrymasks.rename({'variable':'country'})
 
         if bbox:
             da_countrymasks = cut_to_region(da_countrymasks, bbox)
@@ -713,9 +712,12 @@ def load_countrymask(
             select = da_countrymasks.country.isin(df_countries['abbreviation'])
             da_countrymasks = da_countrymasks.sel(country=select)
         else:
+
             print('Note option to not filter countries based on df_metadata not tested')
 
-        return da_countrymasks, None, None, df_countries 
+            df_countries=None
+
+        return da_countrymasks, df_countries 
 
 
     elif data_source_countrymask == 'shapefile':
@@ -779,6 +781,8 @@ def load_countrymask(
         return gdf_country_borders, countries_regions, countries_mask, df_countries
 
 
+#TODO: change this - should be easier to select fractional or shape, and should give same/similar n of outputs 
+# otherwise make two different functions
 
 
 
@@ -1070,7 +1074,7 @@ def preprocess_all_country_data(
                         bbox = bbox ,
                         )
 
-    # open countrymasks, optional preprocessing (already done in default input files)
+    # open countrymasks, optional preprocessing (already done in default input files) - EDI THIS FIX IT !
     country_borders, countries_regions, countries_mask, df_countries = load_countrymask(
                                         filepath_countrymask,
                                         data_source_countrymask = data_source_countrymask,
@@ -1134,18 +1138,24 @@ def preprocess_all_country_data(
 def get_gridscale_demographics(
     da_population,
     da_countrymasks,
-    df_countries_matched, 
+    df_metadata, 
     da_cohort_size,
     startyear=2000,
     endyear=2005,
-    #chunksize=100
 ):
     """
     To do: make a wrapper function that runs all previous and does this
     make a function that does this just for one country/region if one only wants a certain country? - doing it ! to clean up nicer later 
     """
 
-    da_pop = da_population.sel(time=slice(startyear, endyear))   # TODO: check optimal chunking sizes and whether to chunk here or above,myabe here?  #.chunk({'time': chunksize, 'lat': chunksize, 'lon': chunksize})
+    da_pop = da_population
+
+    t = pd.to_datetime(da_pop.time.values, errors="coerce")
+
+    if pd.notnull(t).all() and ((t.month == 7) & (t.day == 1)).all():
+        da_pop = da_pop.assign_coords(time=t.year.astype(int))
+    
+    da_pop=da_pop.sel(time=slice(startyear,endyear)) 
     
     # Initialize the combined demographics DataArray
     da_pop_demographics = None
@@ -1161,95 +1171,40 @@ def get_gridscale_demographics(
     # Loop over countries in WCDE cohort sizes
     for country in ls_countries:
         print(country)
-    
-        # Get iso3 code of the country in the mask 
-        iso = df_countries_matched[df_countries_matched['country_wcde']==country]['iso3_frac'].values[0]
-    
-        # if this isocode is in the mask file 
-        if iso in da_countrymasks['variable']: # TODO: do this in a slightly more intelligent way??? similar to what i was doing b4 with the dataframs, instead of if
-        
-            # Get cohort sizes of the country
-            if da_cohort_size.country.values.size > 1:
-                da_smple_cht = da_cohort_size.sel(country=country).sel(time=slice(startyear, endyear)) 
+
+        if country in df_metadata.index:
+            # Get iso3 code of the country in the mask 
+            iso = df_metadata[df_metadata.index==country]['abbreviation'].values[0]
+
+            # if this isocode is in the mask file 
+            if iso in da_countrymasks['country']: 
+
+                # Get cohort sizes of the country
+                if da_cohort_size.country.values.size > 1:
+                    da_smple_cht = da_cohort_size.sel(country=country).sel(time=slice(startyear, endyear)) 
+                else:
+                    da_smple_cht = da_cohort_size.sel(time=slice(startyear, endyear)) 
+
+                # Cohort relative sizes in the sample country
+                da_smple_cht_prp = da_smple_cht / da_smple_cht.sum(dim='ages')
+            
+                # Get population of that country and multiply by fraction of each cohort
+                pop_country = ((da_pop * da_countrymasks.sel(country=iso)) * da_smple_cht_prp)
+            
+                if da_pop_demographics is None:
+                    da_pop_demographics = pop_country
+                else:
+                    da_pop_demographics += pop_country
+            
+                # Explicitly clear intermediate variables to free up memory
+                del iso, da_smple_cht, da_smple_cht_prp, pop_country
+            
             else:
-                da_smple_cht = da_cohort_size.sel(time=slice(startyear, endyear)) 
 
-            # Cohort relative sizes in the sample country
-            da_smple_cht_prp = da_smple_cht / da_smple_cht.sum(dim='ages')
-        
-            # Get population of that country and multiply by fraction of each cohort
-            pop_country = ((da_pop * da_countrymasks.sel(variable=iso)) * da_smple_cht_prp).drop_vars(['variable', 'country'])
-        
-            if da_pop_demographics is None:
-                da_pop_demographics = pop_country
-            else:
-                da_pop_demographics += pop_country
-        
-            # Explicitly clear intermediate variables to free up memory
-            del iso, da_smple_cht, da_smple_cht_prp, pop_country
-        
-        else:
+                print(f'**iso {iso} not in mask')
 
-            print(f'**iso {iso} not in mask')
-
-    
     da_pop_demographics = da_pop_demographics.compute()
     
     return da_pop_demographics
 
 
-
-
-
-
-def population_demographics_gridscale_global(
-    startyear=2000,
-    endyear=2005,
-    ssp=2,
-    urbanrural=False,
-    chunksize=100
-):
-    """
-    Wrapper function to run previous functions choosing isimip round and ssp, for filepaths see component functions. 
-    """
-
-    class HiddenPrints:
-        def __enter__(self):
-            self._original_stdout = sys.stdout
-            sys.stdout = open(os.devnull, 'w')
-    
-        def __exit__(self, exc_type, exc_val, exc_tb):
-            sys.stdout.close()
-            sys.stdout = self._original_stdout
-
-    
-    with HiddenPrints():
-        df_countries_matched = match_country_names_all_mask_frac();
-
-        df_cohort_sizes, ages, years = load_cohort_sizes(ssp=ssp)
-
-        da_population = load_population(ssp=ssp,
-                                    startyear=startyear,
-                                    endyear=endyear,
-                                   urbanrural=urbanrural)
-
-    print('loading country masks')
-    da_countrymasks = load_countrymasks_fillcoasts() #.chunk({'lat': chunksize, 'lon': chunksize})
-
-    print('interpolating cohort sizes per country')
-    with HiddenPrints():
-        da_cohort_size = interpolate_cohortsize_countries(df_cohort_sizes,
-                                                 ages,
-                                                 years)
-    print('calculating gridscale demographics')
-    with HiddenPrints():
-        da_pop_demographics = get_gridscale_demographics(da_population,
-                                                 da_countrymasks,
-                                                 df_countries_matched,
-                                                 da_cohort_size,
-                                                 startyear=startyear,
-                                                 endyear=endyear);
-
-
-
-    return da_pop_demographics
